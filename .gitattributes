@@ -1,0 +1,28 @@
+## --------------------------------------------------------------#
+## .gitattributes for Git LFS (Large File Storage)
+##
+## This file tells Git which files should be tracked via LFS instead
+## of the standard Git storage method.
+##
+## LFS is designed for large files (datasets, images, binaries) that
+## would otherwise bloat the repository size and slow down cloning.
+##
+## How it works:
+##   - Files matching these patterns are tracked in version control
+##   - But their contents are stored on a separate LFS server
+##   - Git stores only a small pointer file in the repository
+##   - When you clone/pull, Git automatically downloads the actual files
+##
+## IMPORTANT:
+##   - You must have Git LFS installed (see GIT_LFS_SETUP.md)
+##   - Do NOT add these files to .gitignore
+##   - LFS tracking is set up once; afterwards it works automatically
+##
+## --------------------------------------------------------------#
+
+#####Large Files Folder########################################----
+# Track ALL files in the "01 - Large Files" subdirectory via LFS
+# This is intended for large datasets that need version control
+# but would be too large for standard Git storage
+
+01_data/03_large_files_LFS/** filter=lfs diff=lfs merge=lfs -text
