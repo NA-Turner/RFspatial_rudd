@@ -1,25 +1,31 @@
 ##
 #building PA dataframe from cleaned and filtered detection dataframe.
-#idea would be for every presence in the dataframe to add a corresponding absence location
-#randomly assigned to a receiver an individual was not detected on at that time
-#recs also have to have been deployed and avaliable for a possible detectin 
-#so need to take deployments and winter removals into account when building the dataframe 
-
+#spatial RF models cannot handle large dataframes so need to ensure we have 10k rows or less
 
 library(data.table)  
 unique(rudd_dets$glatos_array)
 #date range for the study when we have 4 or more fish avaliable at any given time period
-saveRDS(rudd_dets_updated, file = "Rudddets01062026.rds")
+#saveRDS(rudd_dets_updated, file = "Rudddets01062026.rds")
+rudd_dets_updated<-Rudddets01062026
 
-rudd_dets_updated<- rudd_dets_updated %>% filter(detection_timestamp_EST>"2021-10-24 00:00:00")
+#this is for 4 fish active at one time
+#daily presence= 8000 detections i.e too much for a RFspatial model to handle
+#rudd_dets_updated<- rudd_dets_updated %>% filter(detection_timestamp_EST>"2021-10-24 00:00:00")
+#rudd_dets_updated <- rudd_dets_updated %>%
+ #filter(
+ # !(as.Date(detection_timestamp_EST) >= as.Date("2023-04-15") & 
+ #    as.Date(detection_timestamp_EST) <= as.Date("2023-04-21")) &
+ #  !(as.Date(detection_timestamp_EST) >= as.Date("2023-12-24") & 
+ #     as.Date(detection_timestamp_EST) <= as.Date("2024-04-19"))
+ #)
 
 rudd_dets_updated <- rudd_dets_updated %>%
- filter(
-  !(as.Date(detection_timestamp_EST) >= as.Date("2023-04-15") & 
-     as.Date(detection_timestamp_EST) <= as.Date("2023-04-21")) &
-   !(as.Date(detection_timestamp_EST) >= as.Date("2023-12-24") & 
-      as.Date(detection_timestamp_EST) <= as.Date("2024-04-19"))
- )
+  filter(
+    (as.Date(detection_timestamp_EST) >= as.Date("2023-04-21") &
+     as.Date(detection_timestamp_EST) <= as.Date("2023-12-09")) |
+    (as.Date(detection_timestamp_EST) >= as.Date("2024-04-20") &
+     as.Date(detection_timestamp_EST) <= as.Date("2025-09-04"))
+  )
 
 #filter out some detections on LKO rec
 rudd_dets_updated<-rudd_dets_updated %>% filter(glatos_array=="HAM")
@@ -52,12 +58,9 @@ for (t in 1:length(ind)){
 
 filtered_detections1<-singleping
 
-#saveRDS(single, paste0("./SimpleAnalyses/",spp[i],"/",spp[i],"_QAQC_dets_rudd_onercvrperping_2015-2020.rds"))
-#add a date column to detections file 
 filtered_detections1$date <- as.Date(filtered_detections1$detection_timestamp_EST, format = "%m/%d/%Y")
 
 #keeps station with the most detections per fish per day 
-# could change to 12 hour time bin later
 #at one detection per day per individual =8001 (thats without absences)
 daily <- filtered_detections1 %>% 
  group_by(transmitter_id, date, station) %>% 
@@ -66,30 +69,203 @@ daily <- filtered_detections1 %>%
  slice_max(n_detections, n = 1, with_ties = FALSE) %>%
  ungroup()
 
-saveRDS(daily, "./01_data/HH_daily_presence_Rudd_Feb11.rds")
-
-###if starting from here... 
-Daily_singleping1 <- readRDS("~/For Github/Rudd-Ecology-HH1/01_data/HH_daily_presence_Rudd_Feb11.rds")
-#Daily_al <- readRDS("~/For Github/Rudd-Ecology-HH1/01_data/HH_daily_presence_Rudd.rds")
-#### get daily station presence #####
-
-# extract unique bin_timestamp from the interpolated data
-int <- unique(daily, by = "date")
-
 ##################################################
 ### load receivers #####
 ####load receivers from GLATOS file. This is provided with GLATOS query
 
 #Select only station, lat, lon from big dataframe and join to small one
+#join receiver informtion (deploy lat and lon to detection file)
+recsham0<-read_csv("01_data/03_large_files_LFS/02_processed_files/Ham_recs_rudd.csv")
 
-Recs_usedinSLpaper <- Recs_usedinSLpaper %>%
- left_join(Daily_singleping1 %>% dplyr::select(station, deploy_lat, deploy_long), by = "station")
 
-Rudd_preppedforRFmodelPADF$station
-Recs_usedinSLpaper$station
+daily$station<-as.factor(daily$station)
+daily$year<-format(daily$date, "%Y")
+daily$year<-as.factor(daily$year)
+recsham0$year<-as.factor(recsham0$year)
+#some duplicates due to battery changes in the same year so just keep one station per year 
+recsham0_unique <- recsham0 %>%
+  distinct(station, year, .keep_all = TRUE)
 
-receivers<-read_glatos_receivers("./01_data/03_large_files_LFS/01_raw_files/GLATOS_receiverLocations_20260106_154310.csv")
-#keep only ones that were used in SL paper 
-recs_filtered <- receivers %>%
- semi_join(Recs_usedinSLpaper, by = "station")
+daily1 <- daily %>%
+  left_join(
+    recsham0_unique %>%
+      select(station, year, deploy_lat, deploy_long),
+    by = c("station", "year")
+  )
 
+#this file now has one detection per individual per day
+#linked to station and lat/lon location of the station 
+#saveRDS(daily1, "01_data/02_processed_files/Rudd daily presence 5active.rds")
+
+##need to assign random absences
+#random absences need to be assigned per individual from the above dataframe
+#and randomly assigned one location where a receiver was avaliable to hear a detection i.e. deployed
+############
+#assigning absences#####
+################
+
+# ── 1. Ensure date columns are the same type ─────────────────────────────────
+daily1 <- daily1 |>
+  mutate(date = as.Date(date))
+
+recsham0 <- recsham0 |>
+  mutate(
+    deploy_date_time  = as.Date(deploy_date_time),
+    recover_date_time = as.Date(recover_date_time)
+  )
+
+# ── 2. Helper: pick a random absence station for one detection ───────────────
+sample_absence_receiver <- function(det_station, det_date, receivers_df) {
+  
+  eligible <- receivers_df |>
+    filter(
+      deploy_date_time  <= det_date,    # receiver already deployed
+      recover_date_time >= det_date,    # receiver not yet recovered
+      station           != det_station  # exclude the detected station
+    )
+  
+  eligible |> slice_sample(n = 1)
+}
+
+# ── 3. Build pseudo-absence rows ─────────────────────────────────────────────
+set.seed(42)
+
+absences <- daily1 |>
+  mutate(
+    absence_receiver = pmap(
+      list(station, date),
+      \(st, dt) sample_absence_receiver(st, dt, recsham0)
+    )
+  ) |>
+  mutate(
+    absence_station    = map_chr(absence_receiver, "station"),
+    absence_deploy_lat = map_dbl(absence_receiver, "deploy_lat"),
+    absence_deploy_long = map_dbl(absence_receiver, "deploy_long")
+  ) |>
+  select(-absence_receiver) |>
+  transmute(
+    transmitter_id = transmitter_id,
+    date           = date,
+    station        = absence_station,
+    n_detections   = 0L,          # zero detections at absence location
+    year           = year,
+    deploy_lat     = absence_deploy_lat,
+    deploy_long    = absence_deploy_long,
+    presence       = 0L
+  )
+
+# ── 4. Label presences and bind ───────────────────────────────────────────────
+presences <- daily1 |>
+  mutate(presence = 1L)
+
+pa_data <- bind_rows(presences, absences) |>
+  arrange(transmitter_id, date)
+
+# ── 5. Sanity checks ──────────────────────────────────────────────────────────
+stopifnot(nrow(pa_data) == 2 * nrow(daily1))
+
+pair_check <- pa_data |>
+  group_by(transmitter_id, date) |>
+  summarise(
+    n_rows      = n(),
+    n_stations  = n_distinct(station),
+    .groups     = "drop"
+  )
+
+stopifnot(all(pair_check$n_rows == 2))
+stopifnot(all(pair_check$n_stations == 2))
+
+cat("Done.\n")
+cat("Total rows:", nrow(pa_data),
+    "| Presences:", sum(pa_data$presence),
+    "| Absences:",  sum(pa_data$presence == 0L), "\n")
+
+
+########QAQC checks of the above ######
+##all pass
+# ── 2. Check no absence station matches its paired presence station ───────────
+
+paired_check <- pa_data |>
+  group_by(transmitter_id, date) |>
+  summarise(
+    presence_station = station[presence == 1L],
+    absence_station  = station[presence == 0L],
+    .groups = "drop"
+  ) |>
+  mutate(same_station = presence_station == absence_station)
+
+same_station_violations <- paired_check |> filter(same_station)
+
+if (nrow(same_station_violations) == 0) {
+  cat("PASS: No absence shares a station with its paired presence.\n")
+} else {
+  cat("FAIL:", nrow(same_station_violations), "pairs share the same station!\n")
+  print(same_station_violations)
+}
+
+# ── 3. Check absence coverage across receivers ────────────────────────────────
+# Useful to spot if any receiver is never/always selected as an absence
+# (could indicate a bias in the random sampling)
+
+absence_freq <- pa_data |>
+  filter(presence == 0L) |>
+  count(station, name = "n_times_as_absence") |>
+  left_join(
+    recsham0 |> select(station, deploy_date_time, recover_date_time),
+    by = "station"
+  ) |>
+  mutate(
+    days_deployed = as.numeric(recover_date_time - deploy_date_time)
+  ) |>
+  arrange(desc(n_times_as_absence))
+
+cat("\nAbsence frequency per receiver:\n")
+print(absence_freq |> select(station, n_times_as_absence, days_deployed))
+
+# ── 4. Spot-check a specific receiver you know was offline ───────────────────
+# Replace with a station name and date range you know it was out of the water
+
+known_offline_station <- "HAM-045"        # <-- change to your station
+known_offline_start   <- as.Date("2023-09-13")   # <-- change to offline period
+known_offline_end     <- as.Date("2025-07-03")   # <-- change to offline period
+
+spot_check <- pa_data |>
+  filter(
+    presence == 0L,
+    station  == known_offline_station,
+    date     >= known_offline_start,
+    date     <= known_offline_end
+  )
+
+if (nrow(spot_check) == 0) {
+  cat("\nPASS: Spot check — no absences at", known_offline_station,
+      "during its known offline period.\n")
+} else {
+  cat("\nFAIL:", nrow(spot_check), "absences incorrectly placed at",
+      known_offline_station, "while it was offline!\n")
+  print(spot_check)
+}
+
+# ── 5. Summary table of presence/absence counts per transmitter ───────────────
+# Quick sanity that every fish has equal presences and absences
+
+balance_check <- pa_data |>
+  group_by(transmitter_id, presence) |>
+  summarise(n = n(), .groups = "drop") |>
+  pivot_wider(names_from = presence, values_from = n,
+              names_prefix = "presence_") |>
+  rename(n_absences = presence_0, n_presences = presence_1) |>
+  mutate(balanced = n_presences == n_absences)
+
+cat("\nPer-fish balance check:\n")
+print(balance_check)
+
+if (all(balance_check$balanced)) {
+  cat("PASS: Every fish has equal presences and absences.\n")
+} else {
+  cat("FAIL: Some fish have unequal presence/absence counts!\n")
+}
+
+
+#save the dataframe 
+saveRDS(pa_data, file = "Rudd_5active_PAdata.rds")

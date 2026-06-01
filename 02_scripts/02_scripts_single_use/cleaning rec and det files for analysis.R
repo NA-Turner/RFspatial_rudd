@@ -95,24 +95,25 @@ ggplot(data = HH_gcmap_valid) +
 
 
 #plot rec deployment retrival timeline
-# Summarise deployment periods per receive deploy_timeline <- recsham0 %>%
+# Summarise deployment periods per receive 
+deploy_timeline <- recsham0 %>%
   group_by(station) %>%
   summarise(start_date = min(deploy_date_time,   na.rm = TRUE),
             end_date   = max(recover_date_time,  na.rm = TRUE)) %>%
   ungroup()
 # Plot timeline
 # Order stations ascending
-deploy_timeline <- deploy_timeline %>%
+recsham0 <- recsham0 %>%
   mutate(station = factor(station, levels = sort(unique(station))))
 
-ggplot(deploy_timeline, aes(y = station)) +
-  geom_segment(aes(x = start_date, xend = end_date,
+ggplot(recsham0, aes(y = station)) +
+  geom_segment(aes(x = deploy_date_time, xend = recover_date_time,
                    y = station, yend = station),
                color = "black", linewidth = 2) +
-  geom_point(aes(x = start_date, y = station), 
-             color = "darkgreen", size = 3) +
-  geom_point(aes(x = end_date, y = station),   
-             color = "darkred", size = 3) +
+  geom_point(aes(x = deploy_date_time, y = station), 
+             color = "darkgreen", size = 5, alpha=0.5) +
+  geom_point(aes(x = recover_date_time, y = station),   
+             color = "firebrick3", size = 3) +
   labs(x = "Date", y = "Station", title = "Receiver Deployment Timeline") +
   theme_minimal() +
   theme(legend.position = "none",
@@ -120,5 +121,6 @@ ggplot(deploy_timeline, aes(y = station)) +
         axis.text.x  = element_text(size = 14),  # x axis date labels
         axis.title   = element_text(size = 16),  # axis titles
         plot.title   = element_text(size = 18))  # plot title
+
 
 
