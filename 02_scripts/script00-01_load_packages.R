@@ -22,6 +22,7 @@ library('patchwork')
 library('dplyr')
 library('purrr')
 library('lubridate')
+library('readxl')
 ###Source functions
 #----------------------------#
 source("02_scripts/01_functions/function01-01_helper_functions.R")
