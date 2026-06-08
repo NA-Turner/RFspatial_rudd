@@ -5,8 +5,7 @@
 library(data.table)  
 unique(rudd_dets$glatos_array)
 #date range for the study when we have 4 or more fish avaliable at any given time period
-#saveRDS(rudd_dets_updated, file = "Rudddets01062026.rds")
-rudd_dets_updated<-Rudddets01062026
+rudd_dets_updated<-#readRDS("c:/Users/TURNERN/Documents/For Github/RFspatial_rudd/01_data/03_large_files_LFS/Rudddets01062026.rds")
 
 #this is for 4 fish active at one time
 #daily presence= 8000 detections i.e too much for a RFspatial model to handle
@@ -30,16 +29,19 @@ rudd_dets_updated <- rudd_dets_updated %>%
 #filter out some detections on LKO rec
 rudd_dets_updated<-rudd_dets_updated %>% filter(glatos_array=="HAM")
 
+rudd_dets_updated1<-rudd_dets_updated %>% filter(!(station_no %in% c("52", "55", "56", "54", "57"
+                , "97", "92", "86", "8", "14")))
+
 ###code from management report
 ###split by individual and remove dets_rudd less than the min lag (i.e., a ping that was detected on more than one receiver)
 #keeps the first detection from the ping tho
-ind<-unique(rudd_dets_updated$animal_id)
+ind<-unique(rudd_dets_updated1$animal_id)
 singleping<-data.frame()
 
 #loop to go through all individuals
 for (t in 1:length(ind)){
   
-  temp <- subset(rudd_dets_updated, rudd_dets_updated$animal_id == paste0(ind[t]))
+  temp <- subset(rudd_dets_updated1, rudd_dets_updated1$animal_id == paste0(ind[t]))
   temp <- temp[order(temp$detection_timestamp_EST, decreasing=F),]
   lag<-min(temp$Min)
   
@@ -75,23 +77,35 @@ daily <- filtered_detections1 %>%
 
 #Select only station, lat, lon from big dataframe and join to small one
 #join receiver informtion (deploy lat and lon to detection file)
-recsham0<-read_csv("01_data/03_large_files_LFS/02_processed_files/Ham_recs_rudd.csv")
+#recsham0<-read_csv("01_data/03_large_files_LFS/02_processed_files/Ham_recs_rudd.csv")
+
+#recsham0 <- recsham0 %>%
+#  mutate(recover_date_time = coalesce(recover_date_time, deploy_date_time))
 
 
 daily$station<-as.factor(daily$station)
 daily$year<-format(daily$date, "%Y")
 daily$year<-as.factor(daily$year)
-recsham0$year<-as.factor(recsham0$year)
+recsham0$initial_deploy_year<-as.factor(recsham0$initial_deploy_year)
 #some duplicates due to battery changes in the same year so just keep one station per year 
 recsham0_unique <- recsham0 %>%
-  distinct(station, year, .keep_all = TRUE)
+  distinct(station, initial_deploy_year, .keep_all = TRUE)
+
+########################################################################
+#write.csv(recsham0_unique, "hamrecs_rudd2023 to 2025 unique.csv")
+
+recsham0_unique <- recsham0_unique %>% 
+  rename(year = initial_deploy_year)
+
 
 daily1 <- daily %>%
   left_join(
     recsham0_unique %>%
-      select(station, year, deploy_lat, deploy_long),
+      select(station, deploy_lat, deploy_long, year),
     by = c("station", "year")
   )
+
+
 
 #this file now has one detection per individual per day
 #linked to station and lat/lon location of the station 
@@ -108,7 +122,7 @@ daily1 <- daily %>%
 daily1 <- daily1 |>
   mutate(date = as.Date(date))
 
-recsham0 <- recsham0 |>
+recsham0_unique <- recsham0_unique |>
   mutate(
     deploy_date_time  = as.Date(deploy_date_time),
     recover_date_time = as.Date(recover_date_time)
@@ -129,6 +143,7 @@ sample_absence_receiver <- function(det_station, det_date, receivers_df) {
 
 # ── 3. Build pseudo-absence rows ─────────────────────────────────────────────
 set.seed(42)
+library(purrr)
 
 absences <- daily1 |>
   mutate(
@@ -268,4 +283,4 @@ if (all(balance_check$balanced)) {
 
 
 #save the dataframe 
-saveRDS(pa_data, file = "Rudd_5active_PAdata.rds")
+#saveRDS(pa_data, file = "Rudd_5active_PAdata.rds")

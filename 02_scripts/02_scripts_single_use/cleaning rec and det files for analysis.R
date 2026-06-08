@@ -27,17 +27,18 @@ recs_ham<-recs %>% filter(glatos_array=="HAM")
 recs_ham1<-recs_ham %>% filter(!(station_no %in% c("52", "55", "56", "54", "57"
                 , "97", "92", "86", "8", "14")))
 unique(recs_ham1$station_no)
-# add a year column to recs df
-recs_ham1$year<-format(recs_ham1$deploy_date_time, "%Y")
 
-#want rec data for just October 2021-onwards
+#want rec data from 2021 (in case any were deployed before the start date of our study)
 
 recsham11 <- recs_ham1 %>%
-  filter(deploy_date_time >= as.POSIXct("2021-10-20", tz = "UTC"))
+  filter(deploy_date_time >= as.POSIXct("2021-01-01", tz = "UTC"))
 
 #write csv
-write_csv(recsham11,"01_data/03_large_files_LFS/02_processed_files/Ham_recs_rudd.csv" )
+#write_csv(recsham11,"01_data/03_large_files_LFS/02_processed_files/Ham_recs_rudd.csv" )
 recsham0<-read_csv("01_data/03_large_files_LFS/02_processed_files/Ham_recs_rudd.csv")
+
+recsham0 <- recsham0 %>%
+  mutate(recover_date_time = coalesce(recover_date_time, deploy_date_time))
 
 #load in mapping data
 HH_gcmap <- st_read("01_data/04_shapefiles/HH_Poly_Mar2025/HH_WaterLinesToPoly_21Mar2025.shp")
@@ -61,31 +62,33 @@ ggplot(data = HH_gcmap) +
 ##make a timeline plot with time on x and rec on y for deployments and retrievals
 #can go with this plot in the supplementary  
 # maybe we can add colors to the recs based on orignal year deployed like in larocque paper?
-
-
 #add in year initially deployed 
-
 # Get the initial deployment year for each unique receiver
 # Get the initial deployment year for each unique receiver
-# Based on the earliest date for each receiver
-initial_deploy <- recsham0 %>%
-  group_by(station) %>%
-  filter(deploy_date_time == min(deploy_date_time)) %>%  # keep earliest deployment
-  mutate(initial_deploy_year = format(deploy_date_time, "%Y")) %>%  # extract year
-  select(station, initial_deploy_year, deploy_lat, deploy_long) %>%
-  distinct()                                             # one row per receiver
-
-# Join back to main dataframe
+# Based on the earliest date for each receiver\
 recsham0 <- recsham0 %>%
-  left_join(initial_deploy, by = "station")
-
+  mutate(
+    deploy_year = as.integer(format(deploy_date_time, "%Y")),
+    recovery_year = as.integer(format(
+      coalesce(recover_date_time, deploy_date_time), "%Y"
+    ))
+  ) %>%
+  rowwise() %>%
+  mutate(year = list(seq(deploy_year, recovery_year))) %>%
+  unnest(year) %>%
+  ungroup() %>%
+  mutate(initial_deploy_year = as.character(year)) %>%
+  select(-deploy_year, -recovery_year, -year)  # clean up helper columns
 #plot yearly array with receiver the colour of when it was initially deployed 
 #for supplemental
-ggplot(data = HH_gcmap_valid) +
+#keep only unique station per year
+
+
+ggplot(data = HH_gcmap) +
   geom_sf(fill = "lightblue", color = "white") +
   geom_point(data = recsham0, 
-             aes(x = deploy_long.x, y = deploy_lat.x, color = initial_deploy_year)) +
-  facet_wrap(~year) +
+             aes(x = deploy_long, y = deploy_lat, color = initial_deploy_year)) +
+  facet_wrap(~initial_deploy_year) +
   labs(x = "Longitude", y = "Latitude", color = "Deployment Year") +  # legend title set here
   theme_minimal() +
   theme(axis.text.y   = element_text(size = 12),

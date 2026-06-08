@@ -13,16 +13,6 @@
 
 
 #########selecting approximate buffer ranges for fall and summer 
-##note** looked at assigning each receiver to a group based on methodology in the Wells paper
-#however after reviewing the receiver file and depths associated with each, they did not always match up
-#to Wells paper (across recs that were the same ID) so didnt want to mis assign recs or reassign recs
-#from what they were previously assigned to in the wells paper
-#for that reason, chose two chains to represent nearshore and offshore recs
-#took the group mean of each of the two chains for summer and fall
-#assigned to recs and will represent their buffer zone for the two thermal seasons
-#these buffer zones will be used to create a normal random dist of detection points at recs
-#for unique locations to be used in rfspatial model
-
 ##offshore and nearshore
 #all the west end recs (offshore and nearshore assigned to chain B)
 
@@ -59,16 +49,6 @@ detectionrange_means<-wellsrecs %>%
 ## Water temperatures for 2023-2025?
 ##
 ######################
-#have data from center station for 
-#2023 June 15th to November 24th 
-#2024 July 30th to November 7th 
-#this data doesnt show temp changes so cant calculate when thermocline/isocline establishes
-#if we can get access to the center station data then we can calculate exactly the start/ends 
-#for stratification in HH
-# need to calculate the temp gradient between each pair of adjacent depth loggers
-#apply the threshold >1'C summer or <1'C isothermal
-#identify the first DOY when the gradient exceeds the 1'Cm 
-
 #larocque et al 2024 paper
 #when missing temperature data used 
 #mean julian day of seasonal deliniation based on some older center station temp data and based on thermcline/isocline also
@@ -95,22 +75,41 @@ pa_data$thermal <- ifelse(
 
 unique(pa_data$station)
 #station list 
-[1] "HAM-032" "HAM-079" "HAM-095" "HAM-099" "HAM-041" "HAM-098" "HAM-030" "HAM-078" "HAM-044" "HAM-077" "HAM-094" "HAM-037" "HAM-063"
-[14] "HAM-034" "HAM-043" "HAM-093" "HAM-003" "HAM-070" "HAM-062" "HAM-005" "HAM-042" "HAM-061" "HAM-089" "HAM-071" "HAM-047" "HAM-072"
-[27] "HAM-027" "HAM-036" "HAM-090" "HAM-013" "HAM-051" "HAM-004" "HAM-076" "HAM-046" "HAM-088" "HAM-059" "HAM-007" "HAM-002" "HAM-035"
-[40] "HAM-017" "HAM-080" "HAM-015" "HAM-028" "HAM-085" "HAM-068" "HAM-023" "HAM-083" "HAM-053" "HAM-087" "HAM-067" "HAM-001" "HAM-073"
-[53] "HAM-082" "HAM-058" "HAM-029" "HAM-025" "HAM-074" "HAM-081" "HAM-096" "HAM-022" "HAM-084" "HAM-066" "HAM-021" "HAM-091" "HAM-011"
-[66] "HAM-033" "HAM-075" "HAM-045" "HAM-052" "HAM-057" "HAM-048" "HAM-060" "HAM-039" "HAM-055" "HAM-012" "HAM-018" "HAM-009"
+
 #assign nearshore or offshore for receiver location 
 pa_data$stationloc <- ifelse(
-  pa_data$station %in% c("HAM-001", "HAM-040"),
+  pa_data$station %in% c("HAM-004", "HAM-041", "HAM-021", "HAM-017", "HAM-022", "HAM-039"),
   "offshore",
   ifelse(
-    df$station %in% c("HAM-045", "HAM-090"),
+    pa_data$station %in% c( "HAM-032", "HAM-079", "HAM-095", "HAM-099", "HAM-098", "HAM-030",
+  "HAM-078", "HAM-044", "HAM-077", "HAM-094", "HAM-037", "HAM-063",
+  "HAM-034", "HAM-043", "HAM-093", "HAM-003", "HAM-070", "HAM-062",
+  "HAM-005", "HAM-042", "HAM-061", "HAM-089", "HAM-071", "HAM-047",
+  "HAM-072", "HAM-027", "HAM-036", "HAM-090", "HAM-013", "HAM-051",
+  "HAM-076", "HAM-046", "HAM-088", "HAM-059", "HAM-007", "HAM-002",
+  "HAM-035", "HAM-080", "HAM-015", "HAM-028", "HAM-085", "HAM-068",
+  "HAM-023", "HAM-083", "HAM-053", "HAM-087", "HAM-067", "HAM-073",
+  "HAM-082", "HAM-058", "HAM-029", "HAM-025", "HAM-074", "HAM-081",
+  "HAM-096", "HAM-084", "HAM-066", "HAM-091", "HAM-011", "HAM-033",
+  "HAM-075", "HAM-045", "HAM-052", "HAM-057", "HAM-048", "HAM-060",
+   "HAM-055", "HAM-012", "HAM-018", "HAM-009", "HAM-001"),
     "nearshore",
     NA
   )
 )
+
+#will have to plot thermo/iso on map to validate that all points were assigned and were assigned correctly 
+ggplot(data = HH_gcmap) +
+  geom_sf(fill = "lightblue", color = "white") +
+  geom_point(data = pa_data, 
+             aes(x = deploy_long, y = deploy_lat, color = stationloc)) +
+  facet_wrap(~year) +
+  labs(x = "Longitude", y = "Latitude", color = "Deployment Year") +  # legend title set here
+  theme_minimal() +
+  theme(axis.text.y   = element_text(size = 12),
+        axis.text.x   = element_text(size = 12),
+        legend.title  = element_text(size = 14),  # controls font size of legend title
+        legend.text   = element_text(size = 12))  # controls font size of legend items
 
 ##then assign the buffer range based on nearshore/offshore and thermal layer
 
@@ -128,3 +127,10 @@ pa_data <- pa_data %>%
 #using the specific buffer zones around recs at different times of the year
 #and the lake polygon to ensure there are not locations randomly placed on impassable features such as land
 #look at brownscombe code for this aswell to help in coding 
+
+#issues with NAs for deploy lat and deploy long investigate
+
+
+
+#save dataframe
+saveRDS(pa_data, "PA RFspatial Rudd_1.rds")
