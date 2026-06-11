@@ -67,6 +67,10 @@ detectionrange_means<-wellsrecs %>%
 #then assign the mean buffer based on rec location and thermal bin 
 
 ##assign isocline/thermocline to PA dataframe 
+
+#file from Building PA script
+#saveRDS(pa_data, file = "01_data/02_processed_files/Rudd_5active_PAdata.rds")
+
 pa_data$thermal <- ifelse(
   format(pa_data$date, "%m-%d") >= "10-06" | format(pa_data$date, "%m-%d") <= "06-06",
   "isocline",
@@ -74,11 +78,9 @@ pa_data$thermal <- ifelse(
 )
 
 unique(pa_data$station)
-#station list 
-
 #assign nearshore or offshore for receiver location 
 pa_data$stationloc <- ifelse(
-  pa_data$station %in% c("HAM-004", "HAM-041", "HAM-021", "HAM-017", "HAM-022", "HAM-039"),
+  pa_data$station %in% c("HAM-004", "HAM-041", "HAM-021", "HAM-017", "HAM-039"),
   "offshore",
   ifelse(
     pa_data$station %in% c( "HAM-032", "HAM-079", "HAM-095", "HAM-099", "HAM-098", "HAM-030",
@@ -98,7 +100,10 @@ pa_data$stationloc <- ifelse(
   )
 )
 
+unique(pa_data$station)
 #will have to plot thermo/iso on map to validate that all points were assigned and were assigned correctly 
+
+
 ggplot(data = HH_gcmap) +
   geom_sf(fill = "lightblue", color = "white") +
   geom_point(data = pa_data, 
@@ -131,6 +136,20 @@ pa_data <- pa_data %>%
 #issues with NAs for deploy lat and deploy long investigate
 
 
+#add seasonal time binning 
 
-#save dataframe
-saveRDS(pa_data, "PA RFspatial Rudd_1.rds")
+pa_data <- pa_data %>%
+ mutate(
+  month_num = as.numeric(format(date, "%m")),
+  day_num = as.numeric(format(date, "%d")),
+  season = case_when(
+   (month_num == 4 & day_num >= 1) | month_num == 5 | (month_num == 6 & day_num <= 15) ~ "Spring",
+   (month_num == 16 & day_num >= 7) | month_num %in% c(7, 8, 9) | (month_num == 10 & day_num <= 3) ~ "Summer",
+   (month_num == 10 & day_num >= 4) | month_num == 11 & day_num <= 15 ~ "Fall",
+   (month_num == 11 & day_num >= 16) | month_num %in% c(12, 1, 2) | (month_num == 3 & day_num <= 31) ~ "Winter",
+   TRUE ~ NA_character_
+  )
+ )
+
+#saveRDS(pa_data,file = "01_data/02_processed_files/PA RFspatial Rudd.rds")
+

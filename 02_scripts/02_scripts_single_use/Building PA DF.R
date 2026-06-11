@@ -5,7 +5,7 @@
 library(data.table)  
 unique(rudd_dets$glatos_array)
 #date range for the study when we have 4 or more fish avaliable at any given time period
-rudd_dets_updated<-#readRDS("c:/Users/TURNERN/Documents/For Github/RFspatial_rudd/01_data/03_large_files_LFS/Rudddets01062026.rds")
+rudd_dets_updated<-readRDS("c:/Users/TURNERN/Documents/For Github/RFspatial_rudd/01_data/03_large_files_LFS/Rudddets01062026.rds")
 
 #this is for 4 fish active at one time
 #daily presence= 8000 detections i.e too much for a RFspatial model to handle
@@ -29,8 +29,11 @@ rudd_dets_updated <- rudd_dets_updated %>%
 #filter out some detections on LKO rec
 rudd_dets_updated<-rudd_dets_updated %>% filter(glatos_array=="HAM")
 
+
 rudd_dets_updated1<-rudd_dets_updated %>% filter(!(station_no %in% c("52", "55", "56", "54", "57"
-                , "97", "92", "86", "8", "14")))
+                , "97", "92", "86", "8", "14", "22")))
+
+
 
 ###code from management report
 ###split by individual and remove dets_rudd less than the min lag (i.e., a ping that was detected on more than one receiver)
@@ -63,7 +66,7 @@ filtered_detections1<-singleping
 filtered_detections1$date <- as.Date(filtered_detections1$detection_timestamp_EST, format = "%m/%d/%Y")
 
 #keeps station with the most detections per fish per day 
-#at one detection per day per individual =8001 (thats without absences)
+
 daily <- filtered_detections1 %>% 
  group_by(transmitter_id, date, station) %>% 
  summarise(n_detections = n_distinct(detection_timestamp_utc), .groups = 'drop') %>%
@@ -74,14 +77,14 @@ daily <- filtered_detections1 %>%
 ##################################################
 ### load receivers #####
 ####load receivers from GLATOS file. This is provided with GLATOS query
-
 #Select only station, lat, lon from big dataframe and join to small one
 #join receiver informtion (deploy lat and lon to detection file)
-#recsham0<-read_csv("01_data/03_large_files_LFS/02_processed_files/Ham_recs_rudd.csv")
+#recsham0<-read_csv("01_data/02_processed_files/Ham_recs_rudd.csv")
 
-#recsham0 <- recsham0 %>%
-#  mutate(recover_date_time = coalesce(recover_date_time, deploy_date_time))
+recsham0 <- recsham0 %>%
+  mutate(recover_date_time = coalesce(recover_date_time, deploy_date_time))
 
+unique(recsham0$station)
 
 daily$station<-as.factor(daily$station)
 daily$year<-format(daily$date, "%Y")
@@ -109,7 +112,7 @@ daily1 <- daily %>%
 
 #this file now has one detection per individual per day
 #linked to station and lat/lon location of the station 
-#saveRDS(daily1, "01_data/02_processed_files/Rudd daily presence 5active.rds")
+#saveRDS(daily1, "01_data/02_processed_files/Rudd daily presence 5active1.rds")
 
 ##need to assign random absences
 #random absences need to be assigned per individual from the above dataframe
@@ -127,6 +130,12 @@ recsham0_unique <- recsham0_unique |>
     deploy_date_time  = as.Date(deploy_date_time),
     recover_date_time = as.Date(recover_date_time)
   )
+
+daily1 <- daily1 |>
+  mutate(station = as.character(station))
+
+recsham0 <- recsham0 |>
+  mutate(station = as.character(station))
 
 # ── 2. Helper: pick a random absence station for one detection ───────────────
 sample_absence_receiver <- function(det_station, det_date, receivers_df) {
@@ -261,6 +270,9 @@ if (nrow(spot_check) == 0) {
   print(spot_check)
 }
 
+#rec 45 was recovered taht day so this is fine
+
+
 # ── 5. Summary table of presence/absence counts per transmitter ───────────────
 # Quick sanity that every fish has equal presences and absences
 
@@ -281,6 +293,7 @@ if (all(balance_check$balanced)) {
   cat("FAIL: Some fish have unequal presence/absence counts!\n")
 }
 
+unique(pa_data$station)
 
 #save the dataframe 
-#saveRDS(pa_data, file = "Rudd_5active_PAdata.rds")
+saveRDS(pa_data, file = "01_data/02_processed_files/Rudd_5active_PAdata.rds")

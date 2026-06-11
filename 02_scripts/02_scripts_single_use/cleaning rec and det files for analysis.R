@@ -25,7 +25,7 @@ recs_ham<-recs %>% filter(glatos_array=="HAM")
 #remove 14 only online in 2021 for a few months as it was then not recovered - lost
 
 recs_ham1<-recs_ham %>% filter(!(station_no %in% c("52", "55", "56", "54", "57"
-                , "97", "92", "86", "8", "14")))
+                , "97", "92", "86", "8", "14", "22")))
 unique(recs_ham1$station_no)
 
 #want rec data from 2021 (in case any were deployed before the start date of our study)
@@ -34,8 +34,9 @@ recsham11 <- recs_ham1 %>%
   filter(deploy_date_time >= as.POSIXct("2021-01-01", tz = "UTC"))
 
 #write csv
-#write_csv(recsham11,"01_data/03_large_files_LFS/02_processed_files/Ham_recs_rudd.csv" )
-recsham0<-read_csv("01_data/03_large_files_LFS/02_processed_files/Ham_recs_rudd.csv")
+#write_csv(recsham11,"01_data/02_processed_files/02_processed_files/Ham_recs_rudd.csv" )
+recsham0<-read_csv("01_data/02_processed_files/Ham_recs_rudd.csv")
+unique(recsham0$station)
 
 recsham0 <- recsham0 %>%
   mutate(recover_date_time = coalesce(recover_date_time, deploy_date_time))
@@ -47,10 +48,6 @@ HH_gcmap <- st_transform(HH_gcmap, crs = 4326)
 ggplot(data = HH_gcmap) +
   geom_sf(fill = "lightblue", color = "white") +
   theme_minimal()
-
-
-
-
 #changed the receiver file but will have to change the detections file aswell for these
 #so use the rec file to edit the detections file change these recs below to have deploy lat/lon
 #as the same as the recs file. 
