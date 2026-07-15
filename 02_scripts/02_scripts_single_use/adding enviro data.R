@@ -10,6 +10,10 @@
 ################
 ##load in R packages
 ##########
+library(terra)
+library(sf)
+library(dplyr)
+
 
 
 #receiver data file with habitat data - not sure if required anymore?
@@ -33,8 +37,6 @@ Rudd_recs<-read.csv('01_data/02_processed_files/Ham_recs_rudd.csv')
 
 #assign each unique location to a depth/habitat/substrate etc. 
 #will need raster layers and pull from there? GIS or in R
-# could be the mean of the buffer zone as we dont actuall yknow where the fish was since they are randomly distributed?
-
 #For layers
 #SpatialRF does not support categorical or factor responses
 
@@ -46,6 +48,9 @@ Rudd_recs<-read.csv('01_data/02_processed_files/Ham_recs_rudd.csv')
 #depth
 #  COULD ADD
 #distance to shoreline
+
+#apparently a slope layer? but dont ahve a tiff of that
+
 
 #would not use
 #secchi layer - doesnt seem great 
@@ -122,3 +127,92 @@ print(sort(in_both))
 #[1] "HAM-068" "HAM-070" "HAM-071" "HAM-072" "HAM-073" "HAM-074" "HAM-075" "HAM-076" "HAM-077" "HAM-078"
 #[11] "HAM-079" "HAM-080" "HAM-081" "HAM-082" "HAM-083" "HAM-084" "HAM-085" "HAM-087" "HAM-088" "HAM-089"
 #[21] "HAM-090" "HAM-091" "HAM-093" "HAM-094" "HAM-095" "HAM-096" "HAM-098" "HAM-099"
+
+
+new_stationlist <- Rudd_recs %>% select(station, deploy_lat, deploy_long, deploy_date_time, recover_date_time)
+write.csv(new_stationlist, "station list for Rudd_2026.csv")
+
+#we know the bathy layer is good, so can we use that to extract exact depth points of the P/A data
+
+# ── 1. Load the depth raster ──────────────────────────────────────────────────
+depth_raster <- rast("01_data/04_shapefiles/Enviro layers/WL.tif")
+
+# Quick check
+print(depth_raster)
+plot(depth_raster)  # sanity check visual
+# ── 2. Get unique lat/lon locations ──────────────────────────────────────────
+# Assuming your data has columns: station, deploy_lat, deploy_long
+# (adjust column names to match your actual dataframe)
+#01_data\02_processed_files\PAdata_randomized.rds
+
+unique_locs <- det_randomized |>
+  distinct(transmitter_id, date, station, year, rand_long, rand_lat)
+
+# ── 3. Convert to sf points — use WGS84 (EPSG:4326) since coords are lat/lon ─
+locs_sf <- st_as_sf(unique_locs,
+                    coords = c("rand_long", "rand_lat"),
+                    crs    = 4326)
+
+# ── 4. Reproject points to match the raster CRS ──────────────────────────────
+# terra and sf need matching CRS for extraction to work correctly
+raster_crs <- crs(depth_raster)
+locs_projected <- st_transform(locs_sf, crs = raster_crs)
+
+# Convert to SpatVector for terra::extract()
+locs_vect <- vect(locs_projected)
+# ── 5. Extract depth values ───────────────────────────────────────────────────
+depth_vals <- terra::extract(depth_raster, locs_vect)
+# Returns a dataframe with columns: ID (row index) + raster layer name(s)
+
+# ── 6. Join by ID (row index) — safe regardless of ordering ──────────────────
+# terra's ID column corresponds to the row number of locs_vect
+unique_locs_depth <- unique_locs |>
+  mutate(ID = row_number()) |>                        # create matching ID
+  left_join(depth_vals, by = "ID") |>                 # join on position
+  rename(depth_m = names(depth_raster)[1]) |>         # rename by layer name
+  select(-ID)
+
+
+# ── Split into complete and NA sets ──────────────────────────────────────────
+locs_complete <- unique_locs_depth |> filter(!is.na(depth_m))
+locs_na       <- unique_locs_depth |> filter(is.na(depth_m))
+
+# ── Convert both to sf objects ────────────────────────────────────────────────
+complete_sf <- st_as_sf(locs_complete,
+                        coords = c("rand_long", "rand_lat"),
+                        crs = 4326)
+
+na_sf <- st_as_sf(locs_na,
+                  coords = c("rand_long", "rand_lat"),
+                  crs = 4326)
+
+# ── For each NA point, find the nearest non-NA point ─────────────────────────
+nearest_idx <- st_nearest_feature(na_sf, complete_sf)
+
+# ── Borrow depth from the nearest complete point ──────────────────────────────
+locs_na <- locs_na |>
+  mutate(depth_m = locs_complete$depth_m[nearest_idx])
+
+# ── Recombine ─────────────────────────────────────────────────────────────────
+unique_locs_depth <- bind_rows(locs_complete, locs_na)
+
+# ── Join back to pa_data ──────────────────────────────────────────────────────
+det_randomized <- det_randomized |>
+  select(-depth_m) |>                          # drop the old NA-containing column
+  left_join(unique_locs_depth,
+            by = c("transmitter_id", "date","year", "station", "rand_lat", "rand_long"))
+
+#save for now can delete later once we add in more variables 
+saveRDS(det_randomized, "PA rand with depth.rds")
+
+library(ggplot2)
+
+ggplot(unique_locs_depth, aes(x = rand_long, y = rand_lat, colour = depth_m)) +
+  geom_point(size = 2) +
+  scale_colour_viridis_c(option = "mako", direction = -1, name = "Depth (m)") +
+  theme_minimal() +
+  labs(title = "Station depths", x = "Longitude", y = "Latitude")
+
+
+#have to think about receiver line of sight for some areas
+#grindstone and cootes paradise marsh will have to check

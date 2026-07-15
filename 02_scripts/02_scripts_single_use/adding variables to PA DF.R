@@ -39,11 +39,19 @@ detectionrange_means<-wellsrecs %>%
 
 #buffers are as follows, west end and nearshore following group B
 #fall range = 413
-#summer range = 292
+sum(389+408+366+440+446+395)/6 #407
+#summer range = 300
+#IDs 6,5,13,3, 28, 4)
+sum(309+322+296+276+314+284)/6
 
 #pelagic offshore and southshore 
 #fall range = 429
+sum(435+450+414+414+420)/5
+#426.6
 #summer range = 275
+#recs 21,22, 12, 11, 10
+sum(297+290+266+264+264)/5
+
 
 ########################################
 ## Water temperatures for 2023-2025?
@@ -122,11 +130,13 @@ library(dplyr)
 pa_data <- pa_data %>%
   mutate(buffer_m = case_when(
     stationloc == "offshore"  & thermal == "isocline"    ~ 429,
-    stationloc == "offshore"  & thermal == "thermocline" ~ 275,
+    stationloc == "offshore"  & thermal == "thermocline" ~ 275, #good 
     stationloc == "nearshore" & thermal == "isocline"    ~ 413,
-    stationloc == "nearshore" & thermal == "thermocline" ~ 292,
+    stationloc == "nearshore" & thermal == "thermocline" ~ 300,
     TRUE ~ NA_real_
   ))
+
+unique(pa_data$buffer_m)
 
 #then from here we can add the normally distrubuted randomization to points
 #using the specific buffer zones around recs at different times of the year
@@ -144,12 +154,36 @@ pa_data <- pa_data %>%
   day_num = as.numeric(format(date, "%d")),
   season = case_when(
    (month_num == 4 & day_num >= 1) | month_num == 5 | (month_num == 6 & day_num <= 15) ~ "Spring",
-   (month_num == 16 & day_num >= 7) | month_num %in% c(7, 8, 9) | (month_num == 10 & day_num <= 3) ~ "Summer",
+   (month_num == 6 & day_num >= 16) | month_num %in% c(7, 8, 9) | (month_num == 10 & day_num <= 3) ~ "Summer",
    (month_num == 10 & day_num >= 4) | month_num == 11 & day_num <= 15 ~ "Fall",
    (month_num == 11 & day_num >= 16) | month_num %in% c(12, 1, 2) | (month_num == 3 & day_num <= 31) ~ "Winter",
    TRUE ~ NA_character_
   )
  )
 
+
 #saveRDS(pa_data,file = "01_data/02_processed_files/PA RFspatial Rudd.rds")
+# ── Unique receivers per station x thermal x stationloc for ArcGIS export ────
+colnames(pa_data)
+
+receivers_for_arcgis <- pa_data %>%
+  filter(!is.na(deploy_lat), !is.na(deploy_long)) %>%
+  group_by(station, stationloc) %>%
+  summarise(
+    deploy_lat  = mean(deploy_lat,  na.rm = TRUE),
+    deploy_long = mean(deploy_long, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+library(sf)
+
+receivers_for_arcgis_sf <- receivers_for_arcgis %>%
+  st_as_sf(coords = c("deploy_long", "deploy_lat"), crs = 4326) %>%
+  st_transform(crs = 32617)
+
+#st_write(receivers_for_arcgis_sf,
+#         "01_data/04_shapefiles/receivers_for_arcgis.shp",
+#         delete_if_exists = TRUE)
+
+
 

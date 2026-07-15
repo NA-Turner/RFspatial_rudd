@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<metadata xml:lang="en"><Esri><CreaDate>20211122</CreaDate><CreaTime>10022600</CreaTime><ArcGISFormat>1.0</ArcGISFormat><SyncOnce>TRUE</SyncOnce><DataProperties><lineage><Process ToolSource="c:\program files (x86)\arcgis\desktop10.8\ArcToolbox\Toolboxes\Spatial Analyst Tools.tbx\RasterCalculator" Date="20211122" Time="100226">RasterCalculator Con(IsNull("dem_5m_75m"),100,"dem_5m_75m") "C:\Users\LarocqueSM\OneDrive - DFO-MPO\GIS\Rasters\dem_5m_75m_0"</Process></lineage></DataProperties></Esri></metadata>
