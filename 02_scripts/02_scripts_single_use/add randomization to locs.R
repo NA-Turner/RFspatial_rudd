@@ -11,14 +11,7 @@ library(sf)
 library(dplyr)
 library(ggplot2)
 library(purrr)
-library(parallel)
-library(dplyr)
-
-library(sf)
-library(dplyr)
-library(ggplot2)
-
-
+library(tidyr)
 
 # ── 1. Pre-compute clipped buffers per unique receiver ────────────────────────
 # ── 1. Load and project shapefile ─────────────────────────────────────────────
@@ -69,21 +62,10 @@ receiver_lookup <- inputs_all %>%
   )
 
 
-library(sf)
-library(dplyr)
-library(purrr)
-library(ggplot2)
-
-# ── 1. Load and project water polygon ─────────────────────────────────────────
-HH_gcmap <- st_read(
-  "01_data/04_shapefiles/HH_Poly_Mar2025/HH_WaterLinesToPoly_21Mar2025.shp",
-  quiet = TRUE
-) %>%
-  st_transform(crs = 32617)
 
 # ── 2. Read edited buffer shapefiles ─────────────────────────────────────────
 buffers_isocline <- st_read(
-  "01_data/04_shapefiles/buffer/Isocline/IsoclineBuff.shp"
+  "01_data/04_shapefiles/buffer/Isocline/Isobuff.shp"
 ) %>%
   st_transform(crs = 32617) %>%
   mutate(thermal = "isocline")
@@ -101,12 +83,7 @@ buffers_all <- bind_rows(buffers_isocline, buffers_thermocline) %>%
     station     = MERGE_SRC
   )
 
-# Check
 
-colnames(buffers_all)
-buffers_all %>% st_drop_geometry() %>% count(thermal)
-#
-# 75 in isocline and 73 in thermocline 
 ##################
 
 # ── 4. Build lookup list keyed by station_thermal ─────────────────────────────
@@ -224,53 +201,83 @@ ggplot() +
     subtitle = "Dashed polygons = edited detection buffers  |  Points = randomized locations",
     x = "Longitude", y = "Latitude"
   )
-#save as an rds file 
 
-saveRDS(det_randomized, "PAdata_randomized.rds")
-#################################################################################
+#just a plot with iso and thermo and rec locations in the middle with buffer radius to show 
+#coverage in the harbour 
+
+# Build receiver points sf object for plotting
+# How many unique stations in buffers vs recv_plot
+length(unique(buffers_all$station))
+nrow(recv_plot)
+
+# Any NAs in coordinates
+inputs_all %>% 
+  filter(is.na(recv_x_m) | is.na(recv_y_m)) %>% 
+  count(station)
 
 
-###########above map could go in supp matierals as an example with two fish plotted
-
-sample_recs <- c("HAM-043", "HAM-062", "HAM-091", "HAM-066")
-
-# Detections only at those stations
-det_plot <- det_rand_sf %>%
-  filter(station %in% sample_recs)
-
-# Receiver centres at those stations
-recv_sf <- det_utm_rand %>%
-  filter(station %in% sample_recs) %>%
-  st_drop_geometry() %>%
-  st_as_sf(coords = c("recv_x_m", "recv_y_m"), crs = 32617) %>%
-  st_transform(crs = 4326)
-
-# Buffer rings at those stations
-recv_buffers <- det_utm_rand %>%
-  st_drop_geometry() %>%
-  filter(station %in% sample_recs) %>%
-  group_by(station) %>%
+# Pull receiver centres from buffer centroids — guarantees one point per buffer
+recv_plot <- buffers_all %>%
+  group_by(station, thermal) %>%
   slice(1) %>%
   ungroup() %>%
-  st_as_sf(coords = c("recv_x_m", "recv_y_m"), crs = 32617) %>%
-  st_buffer(dist = .$buffer_m) %>%
+  st_centroid() %>%
   st_transform(crs = 4326)
+
+# Check count matches
+nrow(recv_plot)
+length(unique(buffers_all$station))
+
+ggplot() +
+  # Harbour polygon
+  geom_sf(data = HH_plot, fill = "aliceblue", color = "steelblue", linewidth = 0.4) +
+  # Edited buffer polygons
+  geom_sf(data = buffers_plot, aes (fill = thermal),alpha = 0.5 
+          , linewidth = 0.3, linetype = "dashed") +
+  # Receiver locations as black X's
+ # geom_sf(data = recv_plot, shape = 4, size = 2, color = "black", stroke = 0.8) +
+  # Facet by thermal
+ # facet_wrap(~thermal) +
+  theme_minimal() +
+    #coord_sf(xlim = c(-79.94, -79.85),
+     #      ylim = c(43.27, 43.30),
+      #     expand = TRUE) +
+  labs(
+    title    = "Buffer coverage",
+    x = "Longitude", y = "Latitude"
+  )
+
+
+#save as an rds file 
+
+
+#saveRDS(det_randomized, "c:/Users/TURNERN/Documents/For Github/RFspatial_rudd/01_data/02_processed_files/PAdata_randomized.rds")
+#pa_data<-readRDS("c:/Users/TURNERN/Documents/For Github/RFspatial_rudd/01_data/02_processed_files/")
+
+#################################################################################
+
+# fish as an example
+pa_data$transmitter_id
+rudd512<-filter(det_randomized, transmitter_id=="512")
+
+rudd512$presence<-as.factor(rudd512$presence)
 
 ggplot() +
   geom_sf(data = HH_plot, fill = "aliceblue", color = "steelblue", linewidth = 0.4) +
-  geom_sf(data = recv_buffers, fill = "steelblue", alpha = 0.08,
-          color = "steelblue", linewidth = 0.3, linetype = "dashed") +
-  geom_sf(data = recv_sf, shape = 3, size = 2.5, color = "grey30", stroke = 0.8) +
-  geom_sf(data = det_plot, aes(color = factor(transmitter_id)),
-          size = 1.8, alpha = 0.7) +
-  scale_color_brewer(palette = "Set2", name = "Transmitter ID") +
-  facet_wrap(~thermal) +
-  coord_sf(xlim = c(-79.93, -79.88),
+  geom_sf(data = buffers_plot, aes (fill = thermal),alpha = 0.5 
+          , linewidth = 0.3, linetype = "dashed") +
+  geom_sf(data = rudd512,
+          size = 1.8, alpha = 0.7, aes(color=presence)) +
+  scale_color_brewer(palette = "Set4") +
+  facet_wrap(~year) +
+   coord_sf(xlim = c(-79.94, -79.85),
            ylim = c(43.27, 43.30),
-           expand = TRUE) +
+          expand = TRUE) +
   theme_minimal() +
   labs(
-    title    = "Randomized detection locations — Hamilton Harbour",
-    subtitle = "Crosses = receiver centres  |  Dashed rings = buffer radius  |  Points = randomized locations",
     x = "Longitude", y = "Latitude"
   )
+
+
+unique(det_randomized$station)
+unique(buffers_plot$station)

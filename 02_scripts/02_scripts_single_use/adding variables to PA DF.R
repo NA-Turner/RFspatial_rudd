@@ -1,15 +1,8 @@
-#####
-## introducting randmoization into the presence/absence dataframe 
-## 
-#######
+####
+#setting the thermocline and isocline buffer radius based on 
+#wells et all paper
 
-#need
-#PA dataframe
-#receiver locations 
-#buffer zones - set based on thermocline/isocline and distance set using Wells et al. paper
-#April 2023 to september 4th 2025
-#need thermocline dates 
-
+#adding month, day, season to the dataframe
 
 
 #########selecting approximate buffer ranges for fall and summer 
