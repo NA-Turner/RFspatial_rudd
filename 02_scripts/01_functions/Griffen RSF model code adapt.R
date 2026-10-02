@@ -98,7 +98,7 @@ colnames(PA_rand_w_depthSAVfetch)
 
 
 #####distance to shroeline and zone area added
-saveRDS(PA_rand_w_depthSAVfetch, file = "01_data/02_processed_files/PA_rand_w_depthSAVfetchDISTtoshoreZone.rds")
+#saveRDS(PA_rand_w_depthSAVfetch, file = "01_data/02_processed_files/PA_rand_w_depthSAVfetchDISTtoshoreZone.rds")
 
 
 
@@ -333,3 +333,8 @@ top_int_1_pdp_df_HH$bins_Dist <- top_int_1_pdp_df_HH_bins_Dist
 #next will be building the predictive raster layer 
 #first need to figure out whats going on with zone OR drop it 
 #starting at page 17 of Griffin et al. appendix data sheet 1
+
+
+
+
+#temporal blocking ?? i.e. spring/summer/winter/fall or thermocline isoline?

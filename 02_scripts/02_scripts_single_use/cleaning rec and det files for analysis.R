@@ -1,4 +1,3 @@
-#ctlr shift p to get to command center (top bar)
 
 #receiver dataframe set up
 #filtering 

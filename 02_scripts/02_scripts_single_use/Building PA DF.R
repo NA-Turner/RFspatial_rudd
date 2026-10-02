@@ -1,11 +1,10 @@
 ##
 #building PA dataframe from cleaned and filtered detection dataframe.
-#spatial RF models cannot handle large dataframes so need to ensure we have 10k rows or less
 
 library(data.table)  
 unique(rudd_dets$glatos_array)
 #date range for the study when we have 4 or more fish avaliable at any given time period
-rudd_dets_updated<-readRDS("c:/Users/TURNERN/Documents/For Github/RFspatial_rudd/01_data/03_large_files_LFS/Rudddets01062026.rds")
+rudd_dets_updated<-readRDS("RFspatial_rudd/01_data/03_large_files_LFS/Processed_files/Rudddets01062026.rds")
 
 #this is for 4 fish active at one time
 #daily presence= 8000 detections i.e too much for a RFspatial model to handle

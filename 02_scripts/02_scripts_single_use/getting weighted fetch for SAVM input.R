@@ -149,7 +149,6 @@ b.22$prop.time<-b.22$freqs/b.22$total.rec
 #write csv
 #write.csv(b.22, "01_data/02_processed_files/for SAVM/thermocline wind prop 2024.csv" )
 
-#writing out a test to make sure github is linked up properly 
 
 
 
