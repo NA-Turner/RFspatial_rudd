@@ -1,6 +1,6 @@
-####
+
 #setting the thermocline and isocline buffer radius based on 
-#wells et all paper
+#Wells et al. paper
 
 #adding month, day, season to the dataframe
 
@@ -47,8 +47,6 @@ sum(297+290+266+264+264)/5
 
 
 ########################################
-## Water temperatures for 2023-2025?
-##
 ######################
 #larocque et al 2024 paper
 #when missing temperature data used 
@@ -62,10 +60,6 @@ sum(297+290+266+264+264)/5
 ## based on Wells et al. 2021 paper 
 #isocline was October 6th 
 #stratified from DOY 160 is around June 9th 
-
-#can use these dates to assign isocline thermocline to PA dataframe, 
-#from that decide nearshore vs. offshore recs (in column)
-#then assign the mean buffer based on rec location and thermal bin 
 
 ##assign isocline/thermocline to PA dataframe 
 

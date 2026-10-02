@@ -1,4 +1,4 @@
-,default,wd,direction,calm,panel.fun,mean.wd,norm,Interval1,Interval2,Interval3,Interval4,weight,total.rec,prop.time
+,default,direction,weight,calm,panel.fun,mean.wd,norm,Interval1,Interval2,Interval3,Interval4,wd,total.rec,prop.time
 1,all data,22.5,177,5.1,3.107,-50.6,NA,1.437327348,4.078901934,5.477382597,6.87586326,22.5,2748,0.06441048
 2,all data,45,213,5.1,3.107,-50.6,NA,1.515020718,4.428522099,5.788156077,8.274343923,45,2748,0.077510917
 3,all data,67.5,176,5.1,3.107,-50.6,NA,1.709254144,5.477382597,6.254316298,6.837016575,67.5,2748,0.064046579

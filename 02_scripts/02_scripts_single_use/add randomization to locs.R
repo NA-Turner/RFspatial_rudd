@@ -5,7 +5,7 @@
 #  
 # load in this dataframe
 #PA balanced filtered Rudd detections dataframe 
-pa_data<-readRDS("c:/Users/TURNERN/Documents/For Github/RFspatial_rudd/01_data/02_processed_files/PA RFspatial Rudd.rds")
+pa_data<-readRDS("01_data/02_processed_files/PA RFspatial Rudd.rds")
 colnames(pa_data)
 library(sf)
 library(dplyr)
@@ -252,15 +252,18 @@ ggplot() +
 
 
 #saveRDS(det_randomized, "c:/Users/TURNERN/Documents/For Github/RFspatial_rudd/01_data/02_processed_files/PAdata_randomized.rds")
-#pa_data<-readRDS("c:/Users/TURNERN/Documents/For Github/RFspatial_rudd/01_data/02_processed_files/")
+pa_data<-readRDS("01_data/02_processed_files/PAdata_randomized.rds")
 
 #################################################################################
 
 # fish as an example
 pa_data$transmitter_id
-rudd512<-filter(det_randomized, transmitter_id=="512")
-
+rudd512<-filter(pa_data, transmitter_id=="512")
+rudd512 <- st_as_sf(rudd512)
 rudd512$presence<-as.factor(rudd512$presence)
+class(rudd512)
+
+#HH_plot
 
 ggplot() +
   geom_sf(data = HH_plot, fill = "aliceblue", color = "steelblue", linewidth = 0.4) +

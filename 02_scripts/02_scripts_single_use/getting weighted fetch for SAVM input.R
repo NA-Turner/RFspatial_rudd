@@ -40,6 +40,7 @@ wind_data$thermal <- ifelse(
   "thermocline"
 )
 #write.csv(wind_data, "01_data/02_processed_files/wind data 2024 Burl pier.csv")
+wind2024<-read.csv("01_data/02_processed_files/wind data 2024 Burl pier.csv")
 
 #now build wind weighted fetch for thermal seasons 
 
