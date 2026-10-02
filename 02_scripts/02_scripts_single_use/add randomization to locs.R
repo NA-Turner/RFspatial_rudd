@@ -16,13 +16,13 @@ library(tidyr)
 # ── 1. Pre-compute clipped buffers per unique receiver ────────────────────────
 # ── 1. Load and project shapefile ─────────────────────────────────────────────
 # Load and project water polygon
-HH_gcmap <- st_read(
+HH_plot <- st_read(
   "01_data/04_shapefiles/HH_Poly_Mar2025/HH_WaterLinesToPoly_21Mar2025.shp",
   quiet = TRUE
 ) %>%
   st_transform(crs = 32617)
 
-water_union <- st_union(HH_gcmap)
+water_union <- st_union(HH_plot)
 
 # Create UTM coordinates for detections
 inputs_all <- pa_data %>%
@@ -83,7 +83,7 @@ buffers_all <- bind_rows(buffers_isocline, buffers_thermocline) %>%
     station     = MERGE_SRC
   )
 
-
+head(buffers_all)
 ##################
 
 # ── 4. Build lookup list keyed by station_thermal ─────────────────────────────
@@ -171,7 +171,7 @@ det_randomized <- det_utm_rand %>%
 
 # ── 10. Plot using your edited buffer polygons ────────────────────────────────
 # CHANGE from before: geom_sf(buffers_all) replaces circular st_buffer() rings
-HH_plot      <- st_transform(HH_gcmap, crs = 4326)
+HH_plot      <- st_transform(HH_plot, crs = 4326)
 buffers_plot <- st_transform(buffers_all, crs = 4326)   # edited polygons for plot
 
 sample_tags <- det_randomized %>%
@@ -284,3 +284,72 @@ ggplot() +
 
 unique(det_randomized$station)
 unique(buffers_plot$station)
+
+
+
+#geom_sf change to receiver location 
+#per year 
+#add ham recs rudd
+##needs year column added based on 
+
+recs<-read.csv("01_data/02_processed_files/Ham_recs_rudd.csv")
+recs$deploy_date_time<-as.POSIXct(recs$deploy_date_time)
+recs$year <- as.numeric(format(recs$deploy_date_time, "%Y"))
+#############plot for supp material 
+
+HH_plot +
+  geom_sf(data = buffers_plot, fill = "steelblue", alpha = 0.08,
+          color = "steelblue", linewidth = 0.3, linetype = "dashed",
+          inherit.aes = FALSE) +
+  geom_point(data = recs, aes(x = deploy_long, y = deploy_lat),
+             size = 1) +
+  coord_sf(default_crs = 4326) +
+  facet_wrap(~year) +
+  scale_color_brewer(palette = "Set2", name = "Transmitter ID") +
+  theme_minimal()
+
+#want buffers to only plot if they match up with the recs deployed that year. 
+head(recs)
+
+
+
+library(dplyr)
+library(sf)
+
+# 1. Station-year lookup: every year each receiver was in the water
+recs$deploy_yr  <- as.numeric(format(as.Date(recs$deploy_date_time), "%Y"))
+recs$recover_yr <- as.numeric(substr(recs$recover_date_time, 1, 4))
+recs$recover_yr[is.na(recs$recover_yr)] <- recs$deploy_yr[is.na(recs$recover_yr)]  # no recovery date -> deploy year only
+
+station_year <- unique(do.call(rbind, lapply(seq_len(nrow(recs)), function(i) {
+  data.frame(station = recs$station[i],
+             year    = seq(recs$deploy_yr[i], recs$recover_yr[i]))
+})))
+
+# 2. Buffers: keep only station-years where the receiver was deployed
+buffers_year <- inner_join(buffers_plot, station_year, by = "station")
+
+# 3. Receiver points with the same station-years
+station_locs <- recs %>%
+  distinct(station, .keep_all = TRUE) %>%
+  select(station, deploy_lat, deploy_long)
+
+recs_year <- inner_join(station_year, station_locs, by = "station")
+
+# 4. Plot
+HH_plot +
+  geom_sf(data = buffers_year, fill = "steelblue", alpha = 0.08,
+          color = "steelblue", linewidth = 0.3, linetype = "dashed",
+          inherit.aes = FALSE) +
+  geom_point(data = recs_year, aes(x = deploy_long, y = deploy_lat),
+             size = 1.8, alpha = 0.7) +
+  coord_sf(default_crs = 4326) +
+  facet_wrap(~year) +
+  theme_minimal()
+
+#pretty good just need to clean up
+#one rec is off so need to use the coordinates that were used to make the buffer
+#also one in east end by indian creek that was never there so remove it 
+# maybe best to do facet_wrap year and the 5 maps for thermocline
+#then again but for isocline
+#can maybe do same type of figure where when buffers touch it shows that all as detecteable space
