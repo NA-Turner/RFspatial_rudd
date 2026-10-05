@@ -292,29 +292,15 @@ unique(buffers_plot$station)
 #add ham recs rudd
 ##needs year column added based on 
 
-recs<-read.csv("01_data/02_processed_files/Ham_recs_rudd.csv")
+recs<-read.csv("01_data/02_processed_files/Hamrecs_rudd2023 to 2025_plottingonly.csv")
 recs$deploy_date_time<-as.POSIXct(recs$deploy_date_time)
 recs$year <- as.numeric(format(recs$deploy_date_time, "%Y"))
-#############plot for supp material 
+recs<-recs %>% filter(!(station_no %in% c("52", "55", "56", "54", "57"
+                , "97", "92", "86", "8", "14", "22", "6", "19", "17")))
 
-HH_plot +
-  geom_sf(data = buffers_plot, fill = "steelblue", alpha = 0.08,
-          color = "steelblue", linewidth = 0.3, linetype = "dashed",
-          inherit.aes = FALSE) +
-  geom_point(data = recs, aes(x = deploy_long, y = deploy_lat),
-             size = 1) +
-  coord_sf(default_crs = 4326) +
-  facet_wrap(~year) +
-  scale_color_brewer(palette = "Set2", name = "Transmitter ID") +
-  theme_minimal()
+#################################
+#added 6, 19, 17 need to check if htese are included in PA dataframe 
 
-#want buffers to only plot if they match up with the recs deployed that year. 
-head(recs)
-
-
-
-library(dplyr)
-library(sf)
 
 # 1. Station-year lookup: every year each receiver was in the water
 recs$deploy_yr  <- as.numeric(format(as.Date(recs$deploy_date_time), "%Y"))
@@ -339,10 +325,10 @@ recs_year <- inner_join(station_year, station_locs, by = "station")
 # 4. Plot
 HH_plot +
   geom_sf(data = buffers_year, fill = "steelblue", alpha = 0.08,
-          color = "steelblue", linewidth = 0.3, linetype = "dashed",
+          color = 'thermal', linewidth = 0.3, linetype = "dashed",
           inherit.aes = FALSE) +
   geom_point(data = recs_year, aes(x = deploy_long, y = deploy_lat),
-             size = 1.8, alpha = 0.7) +
+             size = 1, alpha = 0.7, color="darkred") +
   coord_sf(default_crs = 4326) +
   facet_wrap(~year) +
   theme_minimal()
@@ -353,3 +339,28 @@ HH_plot +
 # maybe best to do facet_wrap year and the 5 maps for thermocline
 #then again but for isocline
 #can maybe do same type of figure where when buffers touch it shows that all as detecteable space
+HH_plot +
+  geom_sf(data = buffers_year,
+          aes(color = thermal),
+          fill = "steelblue", alpha = 0.2,
+          linewidth = 0.3, linetype = "dashed",
+          inherit.aes = FALSE) +
+  geom_point(data = recs_year, aes(x = deploy_long, y = deploy_lat),
+             size = 1.5, alpha = 0.7, color = "black") +
+  scale_color_manual(
+    values = c(
+               "isocline"    = "#E69F00",
+               "thermocline"   = "#009E73"),
+    name = "Thermal period"
+  ) +
+  coord_sf(default_crs = 4326) +
+  facet_wrap(~ year) +
+  theme_minimal()+
+   theme(
+    axis.title        = element_text(size = 16),
+    axis.text         = element_text(size = 12),
+    strip.text        = element_text(size = 14, face = "bold"),  # facet labels (years)
+    legend.title      = element_text(size = 14),
+    legend.text       = element_text(size = 12),
+    legend.key.size   = unit(1, "cm")                            # bigger legend keys
+  )
