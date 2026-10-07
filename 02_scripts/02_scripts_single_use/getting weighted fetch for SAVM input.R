@@ -40,7 +40,7 @@ wind_data$thermal <- ifelse(
   "thermocline"
 )
 #write.csv(wind_data, "01_data/02_processed_files/wind data 2024 Burl pier.csv")
-wind2024<-read.csv("01_data/02_processed_files/wind data 2024 Burl pier.csv")
+wind2024<-read.csv("01_data/01_raw_files/wind data 2024 Burl pier.csv")
 
 #now build wind weighted fetch for thermal seasons 
 
@@ -91,8 +91,26 @@ b.2$total.rec<-sum(b.2$freqs)
 #calculate the proportion of time the wind blew from each direction bin 
 b.2$prop.time<-b.2$freqs/b.2$total.rec
 
-#write csv
+library(dplyr)
 
+d <- wind_data_isocline |>
+  dplyr::filter(!is.na(wd), !is.na(ws), ws > 0) |>             # drop calms
+ dplyr:: mutate(direction = (round(wd / 22.5) * 22.5) %% 360)  # 16 bins, 360 -> 0
+
+wts <- d |>
+  dplyr::group_by(direction) |>
+  dplyr::summarise(n = n(), mean_ws = mean(ws), .groups = "drop") |>
+  dplyr::mutate(
+    prop_time  = n / sum(n),                       # frequency only (what the rose shows)
+    wt_speed   = prop_time * mean_ws,              # frequency x mean speed
+    wt_speed   = wt_speed / sum(wt_speed),         # normalized to sum to 1
+    wt_speed2  = prop_time * mean_ws^2,            # optional: speed squared, favors strong winds
+    wt_speed2  = wt_speed2 / sum(wt_speed2)
+  )
+
+wts
+#Wt_speed 
+#write.csv(wts, "01_data/02_processed_files/for SAVM/isocline wind prop 2024_new.csv" )
 #write.csv(b.2, "01_data/02_processed_files/for SAVM/isocline wind prop 2024.csv" )
 
 #thermocline 
@@ -150,5 +168,20 @@ b.22$prop.time<-b.22$freqs/b.22$total.rec
 #write.csv(b.22, "01_data/02_processed_files/for SAVM/thermocline wind prop 2024.csv" )
 
 
+dd <- wind_data_thermocline |>
+  dplyr::filter(!is.na(wd), !is.na(ws), ws > 0) |>             # drop calms
+ dplyr:: mutate(direction = (round(wd / 22.5) * 22.5) %% 360)  # 16 bins, 360 -> 0
 
+wtss <- dd |>
+  dplyr::group_by(direction) |>
+  dplyr::summarise(n = n(), mean_ws = mean(ws), .groups = "drop") |>
+  dplyr::mutate(
+    prop_time  = n / sum(n),                       # frequency only (what the rose shows)
+    wt_speed   = prop_time * mean_ws,              # frequency x mean speed
+    wt_speed   = wt_speed / sum(wt_speed),         # normalized to sum to 1
+    wt_speed2  = prop_time * mean_ws^2,            # optional: speed squared, favors strong winds
+    wt_speed2  = wt_speed2 / sum(wt_speed2)
+  )
 
+wtss
+#write.csv(wtss, "01_data/02_processed_files/for SAVM/thermocline wind prop 2024_new.csv" )

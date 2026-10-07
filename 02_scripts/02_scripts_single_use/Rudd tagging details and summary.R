@@ -5,6 +5,7 @@ library(dplyr)
 library(lubridate)
 library(readr)
 library(readxl)
+library(tidyverse)
 #gathering a table of Rudd tagging details for Rudd used in final analysis 
 PA_rand_w_depthSAVfetch<-readRDS("01_data/02_processed_files/PA_rand_w_depthSAVfetch.rds")
 

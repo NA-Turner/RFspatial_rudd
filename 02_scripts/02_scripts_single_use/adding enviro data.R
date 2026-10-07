@@ -26,7 +26,7 @@ library(dplyr)
 
 #extract exact depth points of the P/A data
 # ── 1. Load the depth raster ──────────────────────────────────────────────────
-depth_raster <- rast("01_data/04_shapefiles/Enviro layers/WL.tif")
+depth_raster <- rast("01_data/02_processed_files/SL enviro layers/WL.tif")
 print(depth_raster)
 plot(depth_raster)  
 
@@ -136,13 +136,10 @@ ggplot() +
 
 
 #SAV
-
-###MISSING AFTER COMP CRASH
-
-
-
+#secchi included - cleaned for masking
+#does not include RBG edits 
 # ── 1. Load the SAV raster ──────────────────────────────────────────────────
-SAV2026_raster <- rast("01_data/04_shapefiles/Enviro layers/SAVM2026/SAVM_202608.tif")
+SAV2026_raster <- rast("01_data/02_processed_files/SAV_secchi_1.tif")
 
 print(SAV2026_raster)
 plot(SAV2026_raster)  # sanity check visual
