@@ -3,6 +3,7 @@
 #buffer ranges by iso/thermo accounted for
 #5 active tags on the array one any given time
 #dataframe to load in called PA_data_randomized
+#01_data\02_processed_files\PAdata_randomized.rds
 
 
 ################
@@ -18,19 +19,14 @@ library(dplyr)
 
 
 #####
-## SL removed rec 43 from analysis do we also want to do the same ?!
-### remove receiver 43 due to inaccurate substrate info and is a travel corridor, not habitat for fish.
-#hab_daily <- hab_daily %>% filter(!station=="HAM-043")
-#keep
+#load in raster data to extract unique values for each unqiue p/a location 
 
-
-#extract exact depth points of the P/A data
-# ── 1. Load the depth raster ──────────────────────────────────────────────────
+#extract depth points 
+# Load the depth raster ──────────────────────────────────────────────────
 depth_raster <- rast("01_data/02_processed_files/SL enviro layers/WL.tif")
 print(depth_raster)
 plot(depth_raster)  
 
-#01_data\02_processed_files\PAdata_randomized.rds
 
 unique_locs <- det_randomized |>
   distinct(transmitter_id, date, station, year, rand_long, rand_lat)
@@ -138,16 +134,31 @@ ggplot() +
 #SAV
 #secchi included - cleaned for masking
 #does not include RBG edits 
+#SAV2026_raster <- rast("01_data/02_processed_files/SAV_secchi_1.tif")
+
 # ── 1. Load the SAV raster ──────────────────────────────────────────────────
-SAV2026_raster <- rast("01_data/02_processed_files/SAV_secchi_1.tif")
+#raster layer includes post-hoc secchi, masking polygon layer file but NO RBG edits to CPM and GC areas
 
-print(SAV2026_raster)
-plot(SAV2026_raster)  # sanity check visual
+SAV2026rbgedits_raster <- rast("01_data/02_processed_files/sav_rbgedits.tif")
 
-fetch_raster <- rast("01_data/04_shapefiles/Enviro layers/fetchweightedm_2024.tif")
+
+print(SAV2026rbgedits_raster)
+plot(SAV2026rbgedits_raster)  # sanity check visual
+
+#load the fetch raster layer 
+#fetch raster layer used in larocque et al. 
+#fetch_raster <- rast("01_data/04_shapefiles/Enviro layers/fetchweightedm_2024.tif")
+
+
+#two fetch layers 
+#1 thermocline 
+#2 isocline 
+
+
 
 print(SAVnad83_raster)
-plot(SAVnad83_raster)  # sanity check visual
+plot(SAVnad83_raster)  
+
 
 
 # ── 2. Get unique lat/lon locations ──────────────────────────────────────────
