@@ -274,7 +274,7 @@ ggplot() +
     x = "Longitude", y = "Latitude"
   )
 
-###addin fetch to the PA dataframe
+###add in fetch to the PA dataframe
 
 PA_rand_w_depthSAV<-readRDS("01_data/02_processed_files/PA_rand_w_depthSAV.rds")
 

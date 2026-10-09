@@ -15,8 +15,6 @@ library(pdp)
 library(sf)
 
 #hamilton harbour polgyon file
-
-
 shorelinemap <- read_sf("01_data/04_shapefiles/HH_Poly_Mar2025/HH_WaterLinesToPoly_21Mar2025.shp")
 shorelinemap <- st_transform(shorelinemap, crs = 4326)
 
@@ -31,7 +29,9 @@ HH_plot
 
 #presence absence locations
 # PA_rand_w_depthSAV
-
+################################
+#load in rasters and P/A data
+#############################
 #raster layers
 #SAV
 SAV2026_raster <- rast("01_data/04_shapefiles/Enviro layers/SAVM2026/SAVM_202608.tif")
@@ -100,8 +100,6 @@ colnames(PA_rand_w_depthSAVfetch)
 #####distance to shroeline and zone area added
 #saveRDS(PA_rand_w_depthSAVfetch, file = "01_data/02_processed_files/PA_rand_w_depthSAVfetchDISTtoshoreZone.rds")
 
-
-
 colnames(PA_rand_w_depthSAVfetch)
 
 pa_data <- PA_rand_w_depthSAVfetch %>%
@@ -113,7 +111,8 @@ pa_data <- PA_rand_w_depthSAVfetch %>%
   )
 pa_data$zone<-as.factor(pa_data$zone)
 
-
+#split into train and test data
+#change % split right now at 60% train 
 pa_data.train <- pa_data[sample(1:nrow(pa_data), nrow(pa_data) * 0.6, replace = FALSE), ]
 pa_data.test  <- pa_data[!(pa_data$rowID %in% pa_data.train$rowID), ]
 
