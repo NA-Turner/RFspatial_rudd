@@ -3,7 +3,7 @@
 #buffer ranges by iso/thermo accounted for
 #5 active tags on the array one any given time
 #dataframe to load in called PA_data_randomized
-#01_data\02_processed_files\PAdata_randomized.rds
+#01_data\02_processed_files\PAdata_randomized.rds to start
 
 
 ################
@@ -13,9 +13,190 @@ library(terra)
 library(sf)
 library(dplyr)
 
+##########
+#hamilton harbour polgyon file
+shorelinemap <- read_sf("01_data/04_shapefiles/HH_Poly_Mar2025/HH_WaterLinesToPoly_21Mar2025.shp")
+shorelinemap <- st_transform(shorelinemap, crs = 4326)
 
+
+HH_plot<-ggplot(shorelinemap) +
+ geom_sf(fill = "lightblue", color = "black", size = 0.5) +
+ theme_minimal() +
+ theme(axis.text = element_text(size = 8))
+#use glatos rpackage to summarize detections by num_fish and num_dets
+
+HH_plot
+
+###########
 #lake ontario water levels for 2024 and 2025 were right in line with the historical average 
 #~75msl for the summer period 
+
+
+#setting the thermocline and isocline buffer radius based on 
+#Wells et al. paper
+
+#########selecting approximate buffer ranges for fall and summer 
+##offshore and nearshore
+#all the west end recs (offshore and nearshore assigned to chain B)
+
+#supp data frome Wells et al - Hamilton Harbour detection range testing
+wellsrecs<-read_excel("01_data/02_processed_files/Wellsetal_suppdata_detectionrange.xlsx")
+
+group_A <- wellsrecs[wellsrecs$Assignment == "A", ]
+group_B <- wellsrecs[wellsrecs$Assignment == "B", ]
+group_C <- wellsrecs[wellsrecs$Assignment == "C", ]
+group_D <- wellsrecs[wellsrecs$Assignment == "D", ]
+group_E <- wellsrecs[wellsrecs$Assignment == "E", ]
+
+#use group A for pelagic offshore + south shore walls
+#use group B for west end and nearshore recs
+
+detectionrange_means<-wellsrecs %>%
+  group_by(Assignment, Season) %>%
+  summarise(
+    group_mean = mean(Mean),
+    group_min = mean(Min),
+    group_max = mean(Max),
+    n_depths = n()
+  )
+
+
+#buffers are as follows, west end and nearshore following group B
+#pulled from supp data
+#fall range = 413
+sum(389+408+366+440+446+395)/6 #407
+#summer range = 300
+#IDs 6,5,13,3, 28, 4)
+sum(309+322+296+276+314+284)/6
+
+#pelagic offshore and southshore 
+#fall range = 429
+sum(435+450+414+414+420)/5
+#426.6
+#summer range = 275
+#recs 21,22, 12, 11, 10
+sum(297+290+266+264+264)/5
+
+
+########################################
+######################
+#larocque et al 2024 paper
+#when missing temperature data used 
+#mean julian day of seasonal deliniation based on some older center station temp data and based on thermcline/isocline also
+#seasons were listed as follows:
+#spring: April 25 to June 6
+#summer: June 7 to October 3; 
+# fall: October 4 to November 17,  
+# winter: November 18 to April 24
+
+## based on Wells et al. 2021 paper 
+#isocline was October 6th 
+#stratified from DOY 160 is around June 9th 
+
+##assign isocline/thermocline to PA dataframe 
+
+#file from Building PA script
+#saveRDS(pa_data, file = "01_data/02_processed_files/Rudd_5active_PAdata.rds")
+
+pa_data$thermal <- ifelse(
+  format(pa_data$date, "%m-%d") >= "10-06" | format(pa_data$date, "%m-%d") <= "06-06",
+  "isocline",
+  "thermocline"
+)
+
+unique(pa_data$station)
+#assign nearshore or offshore for receiver location 
+pa_data$stationloc <- ifelse(
+  pa_data$station %in% c("HAM-004", "HAM-041", "HAM-021", "HAM-017", "HAM-039"),
+  "offshore",
+  ifelse(
+    pa_data$station %in% c( "HAM-032", "HAM-079", "HAM-095", "HAM-099", "HAM-098", "HAM-030",
+  "HAM-078", "HAM-044", "HAM-077", "HAM-094", "HAM-037", "HAM-063",
+  "HAM-034", "HAM-043", "HAM-093", "HAM-003", "HAM-070", "HAM-062",
+  "HAM-005", "HAM-042", "HAM-061", "HAM-089", "HAM-071", "HAM-047",
+  "HAM-072", "HAM-027", "HAM-036", "HAM-090", "HAM-013", "HAM-051",
+  "HAM-076", "HAM-046", "HAM-088", "HAM-059", "HAM-007", "HAM-002",
+  "HAM-035", "HAM-080", "HAM-015", "HAM-028", "HAM-085", "HAM-068",
+  "HAM-023", "HAM-083", "HAM-053", "HAM-087", "HAM-067", "HAM-073",
+  "HAM-082", "HAM-058", "HAM-029", "HAM-025", "HAM-074", "HAM-081",
+  "HAM-096", "HAM-084", "HAM-066", "HAM-091", "HAM-011", "HAM-033",
+  "HAM-075", "HAM-045", "HAM-052", "HAM-057", "HAM-048", "HAM-060",
+   "HAM-055", "HAM-012", "HAM-018", "HAM-009", "HAM-001"),
+    "nearshore",
+    NA
+  )
+)
+
+unique(pa_data$station)
+#will have to plot thermo/iso on map to validate that all points were assigned and were assigned correctly 
+
+
+ggplot(data = HH_gcmap) +
+  geom_sf(fill = "lightblue", color = "white") +
+  geom_point(data = pa_data, 
+             aes(x = deploy_long, y = deploy_lat, color = stationloc)) +
+  facet_wrap(~year) +
+  labs(x = "Longitude", y = "Latitude", color = "Deployment Year") +  # legend title set here
+  theme_minimal() +
+  theme(axis.text.y   = element_text(size = 12),
+        axis.text.x   = element_text(size = 12),
+        legend.title  = element_text(size = 14),  # controls font size of legend title
+        legend.text   = element_text(size = 12))  # controls font size of legend items
+
+##then assign the buffer range based on nearshore/offshore and thermal layer
+
+library(dplyr)
+pa_data <- pa_data %>%
+  mutate(buffer_m = case_when(
+    stationloc == "offshore"  & thermal == "isocline"    ~ 429,
+    stationloc == "offshore"  & thermal == "thermocline" ~ 275, #good 
+    stationloc == "nearshore" & thermal == "isocline"    ~ 413,
+    stationloc == "nearshore" & thermal == "thermocline" ~ 300,
+    TRUE ~ NA_real_
+  ))
+
+unique(pa_data$buffer_m)
+
+#then from here we can add the normally distrubuted randomization to points
+#using the specific buffer zones around recs at different times of the year
+#and the lake polygon to ensure there are not locations randomly placed on impassable features such as land
+#look at brownscombe code for this aswell to help in coding 
+
+#add seasonal time binning 
+
+pa_data <- pa_data %>%
+ mutate(
+  month_num = as.numeric(format(date, "%m")),
+  day_num = as.numeric(format(date, "%d")),
+  season = case_when(
+   (month_num == 4 & day_num >= 1) | month_num == 5 | (month_num == 6 & day_num <= 15) ~ "Spring",
+   (month_num == 6 & day_num >= 16) | month_num %in% c(7, 8, 9) | (month_num == 10 & day_num <= 3) ~ "Summer",
+   (month_num == 10 & day_num >= 4) | month_num == 11 & day_num <= 15 ~ "Fall",
+   (month_num == 11 & day_num >= 16) | month_num %in% c(12, 1, 2) | (month_num == 3 & day_num <= 31) ~ "Winter",
+   TRUE ~ NA_character_
+  )
+ )
+
+
+#saveRDS(pa_data,file = "01_data/02_processed_files/PA RFspatial Rudd.rds")
+
+# ── Unique receivers per station x thermal x stationloc for ArcGIS export ────
+
+#colnames(pa_data)
+#receivers_for_arcgis <- pa_data %>%
+#  filter(!is.na(deploy_lat), !is.na(deploy_long)) %>%
+#  group_by(station, stationloc) %>%
+#  summarise(
+#    deploy_lat  = mean(deploy_lat,  na.rm = TRUE),
+#    deploy_long = mean(deploy_long, na.rm = TRUE),
+#    .groups = "drop"
+#  )
+#receivers_for_arcgis_sf <- receivers_for_arcgis %>%
+#  st_as_sf(coords = c("deploy_long", "deploy_lat"), crs = 4326) %>%
+#  st_transform(crs = 32617)
+#st_write(receivers_for_arcgis_sf,
+#         "01_data/04_shapefiles/receivers_for_arcgis.shp",
+#         delete_if_exists = TRUE)
 
 
 #####
@@ -139,7 +320,7 @@ ggplot() +
 # ── 1. Load the SAV raster ──────────────────────────────────────────────────
 #raster layer includes post-hoc secchi, masking polygon layer file but NO RBG edits to CPM and GC areas
 
-SAV2026rbgedits_raster <- rast("01_data/02_processed_files/sav_rbgedits.tif")
+SAV2026rbgedits_raster <- rast("01_data/02_processed_files/raster layers/sav_rbgedits1")
 
 
 print(SAV2026rbgedits_raster)
@@ -153,6 +334,7 @@ plot(SAV2026rbgedits_raster)  # sanity check visual
 #two fetch layers 
 #1 thermocline 
 #2 isocline 
+#just use thermocline for now
 
 
 
@@ -177,13 +359,13 @@ locs_sf <- st_as_sf(unique_locs,
 
 # ── 4. Reproject points to match the raster CRS ──────────────────────────────
 # terra and sf need matching CRS for extraction to work correctly
-raster_crs <- crs(SAV2026_raster)
+raster_crs <- crs(SAV2026rbgedits_raster)
 locs_projected <- st_transform(locs_sf, crs = raster_crs)
 
 # Convert to SpatVector for terra::extract()
 locs_vect <- vect(locs_projected)
 # ── 5. Extract depth values ───────────────────────────────────────────────────
-SAV_vals <- terra::extract(SAV2026_raster, locs_vect)
+SAV_vals <- terra::extract(SAV2026rbgedits_raster, locs_vect)
 # Returns a dataframe with columns: ID (row index) + raster layer name(s)
 
 # ── 6. Join by ID (row index) — safe regardless of ordering ──────────────────
@@ -191,7 +373,7 @@ SAV_vals <- terra::extract(SAV2026_raster, locs_vect)
 unique_locs_sav <- unique_locs |>
   mutate(ID = row_number()) |>                        # create matching ID
   left_join(SAV_vals, by = "ID") |>                 # join on position
-  rename(SAV = names(SAV2026_raster)[1]) |>         # rename by layer name
+  rename(SAV = names(SAV2026rbgedits_raster)[1]) |>         # rename by layer name
   select(-ID)
 
 
@@ -226,11 +408,6 @@ det_randomized <- PA_rand_w_depth |>
 #save for now can delete later once we add in more variables 
 #saveRDS(det_randomized, "c:/Users/TURNERN/Documents/For Github/RFspatial_rudd/01_data/02_processed_files/PA_rand_w_depthSAV.rds")
 
-library(ggplot2)
-
-#plotting code to make sure depths look like they were generally correctly assigned 
-
-
 locs_sav_sf <- st_as_sf(
   unique_locs_sav1,
   coords = c("rand_long", "rand_lat"),
@@ -238,47 +415,12 @@ locs_sav_sf <- st_as_sf(
 )
 
 
-###see script 
-#add randomization to locs.R for HH plotting script
-
-
-ggplot() +
-  geom_sf(data = HH_plot,
-          fill = "aliceblue",
-          color = "steelblue") +
-  geom_sf(data = locs_sav_sf,
-          aes(colour = SAV),
-          size = 2) +
-#    geom_sf(data = buffers_plot, aes (fill = thermal),alpha = 0.005 
-#          , linewidth = 0.3, linetype = "dashed") +
-  scale_colour_viridis_c(
-    option = "mako",
-    direction = -1,
-    name = "SAV (%)"
-  ) +
-  coord_sf() +
-  theme_minimal()
-
-
-ggplot() +
-  geom_sf(data = HH_plot, fill = "aliceblue", color = "steelblue", linewidth = 0.4) +
- # geom_sf(data = buffers_plot, aes (fill = thermal),alpha = 0.5 
- #         , linewidth = 0.3, linetype = "dashed") +
-  geom_sf(data = locs_nasf1,
-          size = 1.8, alpha = 0.7, aes(color=depth_m)) +
-   coord_sf(xlim = c(-79.94, -79.85),
-           ylim = c(43.27, 43.30),
-          expand = TRUE) +
-  theme_minimal() +
-  labs(
-    x = "Longitude", y = "Latitude"
-  )
-
 ###add in fetch to the PA dataframe
 
-PA_rand_w_depthSAV<-readRDS("01_data/02_processed_files/PA_rand_w_depthSAV.rds")
+#PA_rand_w_depthSAV<-readRDS("01_data/02_processed_files/PA_rand_w_depthSAV.rds")
+PA_rand_w_depthSAV<-det_randomized
 
-unique_locs <- PA_rand_w_depthSAV |>
+unique_locs <- det_randomized |>
   distinct(transmitter_id, date, station, year, rand_long, rand_lat)
 
 # ── 3. Convert to sf points — use WGS84 (EPSG:4326) since coords are lat/lon ─
@@ -288,7 +430,7 @@ locs_sf <- st_as_sf(unique_locs,
 
 # ── 4. Reproject points to match the raster CRS ──────────────────────────────
 # terra and sf need matching CRS for extraction to work correctly
-fetch2026_raster <- rast("01_data/04_shapefiles/Enviro layers/SAVM2026/fetch2026.tif")
+fetch2026_raster <- rast("01_data/02_processed_files/enviro layers final - to be updated when avaliable/fetchnew.tif")
 plot(fetch2026_raster)
 raster_crs <- crs(fetch2026_raster)
 locs_projected <- st_transform(locs_sf, crs = raster_crs)
@@ -338,5 +480,94 @@ det_randomized <- PA_rand_w_depthSAV |>
 #save for now can delete later once we add in more variables 
 #saveRDS(det_randomized, "c:/Users/TURNERN/Documents/For Github/RFspatial_rudd/01_data/02_processed_files/PA_rand_w_depthSAVfetch.rds")
 
-library(ggplot2)
 
+##adding in distance to shoreline
+
+#distance to shoreline code
+
+# ===============================
+# 1. Distance to Shoreline
+# ===============================
+
+# Convert shoreline polygon to boundary
+shoreline_boundary <- st_boundary(shorelinemap)
+# Calculate distance from points to shoreline boundary
+PA_rand_sf <- st_as_sf(
+  det_randomized,
+  coords = c("rand_long", "rand_lat"),
+  crs = 4326,        # <- set this to your actual CRS (e.g. 4326 if lat/long WGS84)
+  remove = FALSE      # keep rand_long/rand_lat as regular columns too
+)
+PA_rand_sf <- st_transform(PA_rand_sf, st_crs(shoreline_boundary))
+
+dist_to_shore <- st_distance(PA_rand_sf, shoreline_boundary)
+# Extract distances
+det_randomized$dist_to_shoreline_m <- as.numeric(dist_to_shore[,1])
+colnames(det_randomized)
+
+
+##add zone variable 
+
+#add 'zones' which will be the same rec groupings we did for goldfish 
+
+det_randomized$zone <- case_when(
+  det_randomized$station %in% c("HAM-053", "HAM-051","HAM-036","HAM-082", "HAM-081") ~ "Bayfront area",
+  det_randomized$station %in% c("HAM-030", "HAM-042", "HAM-044", "HAM-096", "HAM-098", "HAM-095", "HAM-094", "HAM-093", 
+  "HAM-088", "HAM-090","HAM-091", "HAM-089", "HAM-030", "HAM-042") ~ "Cootes Paradise",
+  det_randomized$station %in% c( "HAM-033", "HAM-059", "HAM-060", "HAM-061", "HAM-062","HAM-066", "HAM-067", "HAM-068", "HAM-087") ~ "Grindstone",
+  det_randomized$station %in% c("HAM-048", "HAM-018", "HAM-028", "HAM-037", "HAM-072", "HAM-073", "HAM-074", "HAM-075", "HAM-076", "HAM-079", "HAM-078", 
+                               "HAM-077", "HAM-085", "HAM-084", "HAM-083", "HAM-005", "HAM-011", "HAM-027", "HAM-023", "HAM-080") ~ "West End",
+  det_randomized$station %in% c("HAM-035") ~ "East End",
+  det_randomized$station %in% c("HAM-013", "HAM-003", "HAM-002", "HAM-012", "HAM-045", "HAM-025", "HAM-058", "HAM-009", "HAM-008", "HAM-034", "HAM-035") ~ "East End",
+  det_randomized$station %in% c("HAM-046", "HAM-047", "HAM-007", "HAM-015", "HAM-001") ~ "North shore",
+  det_randomized$station %in% c("HAM-021", "HAM-004", "HAM-017", "HAM-039", "HAM-041") ~ "Central",
+  det_randomized$station %in% c("HAM-070", "HAM-099" ,"HAM-071", "HAM-063", "HAM-032", "HAM-043", "HAM-029") ~ "Carrolls Bay",
+  TRUE ~ NA_character_ # Default to NA if no match
+)
+
+
+#dataframe now has:
+#thermal, year, month, day, season, depth, SAV, fetch, distance to shoreline, zone area
+
+#should we assign zone based on mean clustering analsys ???
+#run a correlation matrix
+
+library(dplyr)
+library(corrplot)
+
+# 1. Select only the numeric explanatory variables (drop the response, IDs, etc.)
+predictors <- det_randomized %>%
+  select(where(is.numeric)) %>%
+  select(-c(presence))   # <- replace with your response / non-predictor columns
+
+predictors <- det_randomized %>%
+  st_drop_geometry() %>%
+  select(depth_m, SAV, fetch, dist_to_shoreline_m)   # add month_num / day_num if they're candidate predictors
+
+
+# 2. Correlation matrix (Spearman is safer if variables are skewed or non-linear)
+cor_mat <- cor(predictors, use = "pairwise.complete.obs", method = "pearson")
+round(cor_mat, 2)
+
+# 3. Visualize
+corrplot(cor_mat,
+         method = "color",
+         type = "upper",
+         order = "hclust",
+         addCoef.col = "black",
+         number.cex = 0.7,
+         tl.col = "black",
+         tl.srt = 45,
+         diag = FALSE)
+
+# 4. Flag highly correlated pairs (|r| > 0.7 is a common threshold)
+high_cor <- as.data.frame(as.table(cor_mat)) %>%
+  filter(as.numeric(Var1) < as.numeric(Var2), abs(Freq) > 0.7) %>%
+  arrange(desc(abs(Freq)))
+high_cor
+
+
+
+##### save for use in random forest analysis
+#saveRDS(det_randomized, file = "01_data/02_processed_files/PArand_complete.rds")
+#move to RF model code r. script

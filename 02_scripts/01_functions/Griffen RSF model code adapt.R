@@ -14,10 +14,18 @@ library(iml)
 library(pdp)
 library(sf)
 
+
+#predictors October 2026
+
+#others to consider
+#photoperiod - vary temporaly 
+
+#stack rasters???
+
 #hamilton harbour polgyon file
 shorelinemap <- read_sf("01_data/04_shapefiles/HH_Poly_Mar2025/HH_WaterLinesToPoly_21Mar2025.shp")
 shorelinemap <- st_transform(shorelinemap, crs = 4326)
-
+###############################################
 
 HH_plot<-ggplot(shorelinemap) +
  geom_sf(fill = "lightblue", color = "black", size = 0.5) +
@@ -27,24 +35,23 @@ HH_plot<-ggplot(shorelinemap) +
 
 HH_plot
 
-#presence absence locations
-# PA_rand_w_depthSAV
 ################################
 #load in rasters and P/A data
 #############################
 #raster layers
 #SAV
-SAV2026_raster <- rast("01_data/04_shapefiles/Enviro layers/SAVM2026/SAVM_202608.tif")
-plot(SAV2026_raster)
+SAV2026rbgedits_raster <- rast("01_data/02_processed_files/raster layers/sav_rbgedits1")
+plot(SAV2026rbgedits_raster)
 #depth 
-depthrast<-rast("01_data/04_shapefiles/Enviro layers/WL.tif")
+depthrast<-rast("01_data/02_processed_files/raster layers/depth/WL.tif")
 plot(depthrast)
 #fetch
-fetct2026_raster <- rast("01_data/04_shapefiles/Enviro layers/SAVM2026/fetch2026.tif")
-plot(fetct2026_raster)
+fetch2026_raster <- rast("01_data/02_processed_files/raster layers/fetch/fetchnew.tif")
+plot(fetch2026_raster)
 
-#PA data frame 
-PA_rand_w_depthSAVfetch<-readRDS("01_data/02_processed_files/PA_rand_w_depthSAVfetch.rds")
+#PA data frame with all variables added  (see adding predictors to DF.R code)
+
+PA_rand_w_depthSAVfetch<-readRDS("01_data/02_processed_files/PArand_complete.rds")
 # Row ID for indexing
 PA_rand_w_depthSAVfetch$rowID <- seq_len(nrow(PA_rand_w_depthSAVfetch))
 
@@ -55,56 +62,11 @@ PA_rand_w_depthSAVfetch$thermal<-as.factor(PA_rand_w_depthSAVfetch$thermal)
 PA_rand_w_depthSAVfetch$season<-as.factor(PA_rand_w_depthSAVfetch$season)
 PA_rand_w_depthSAVfetch$presence<-as.factor(PA_rand_w_depthSAVfetch$presence)
 
-#add 'zones' which will be the same rec groupings we did for goldfish 
-PA_rand_w_depthSAVfetch$zone
-
-PA_rand_w_depthSAVfetch$zone <- case_when(
-  PA_rand_w_depthSAVfetch$station %in% c("HAM-053", "HAM-051","HAM-036","HAM-082", "HAM-081") ~ "Bayfront area",
-  PA_rand_w_depthSAVfetch$station %in% c("HAM-030", "HAM-042", "HAM-044", "HAM-096", "HAM-098", "HAM-095", "HAM-094", "HAM-093", 
-  "HAM-088", "HAM-090","HAM-091", "HAM-089", "HAM-030", "HAM-042") ~ "Cootes Paradise",
-  PA_rand_w_depthSAVfetch$station %in% c( "HAM-033", "HAM-059", "HAM-060", "HAM-061", "HAM-062","HAM-066", "HAM-067", "HAM-068", "HAM-087") ~ "Grindstone",
-  PA_rand_w_depthSAVfetch$station %in% c("HAM-048", "HAM-018", "HAM-028", "HAM-037", "HAM-072", "HAM-073", "HAM-074", "HAM-075", "HAM-076", "HAM-079", "HAM-078", 
-                               "HAM-077", "HAM-085", "HAM-084", "HAM-083", "HAM-005", "HAM-011", "HAM-027", "HAM-023", "HAM-080") ~ "West End",
-  PA_rand_w_depthSAVfetch$station %in% c("HAM-035") ~ "East End",
-  PA_rand_w_depthSAVfetch$station %in% c("HAM-013", "HAM-003", "HAM-002", "HAM-012", "HAM-045", "HAM-025", "HAM-058", "HAM-009", "HAM-008", "HAM-034", "HAM-035") ~ "East End",
-  PA_rand_w_depthSAVfetch$station %in% c("HAM-046", "HAM-047", "HAM-007", "HAM-015", "HAM-001") ~ "North shore",
-  PA_rand_w_depthSAVfetch$station %in% c("HAM-021", "HAM-004", "HAM-017", "HAM-039", "HAM-041") ~ "Central",
-  PA_rand_w_depthSAVfetch$station %in% c("HAM-070", "HAM-099" ,"HAM-071", "HAM-063", "HAM-032", "HAM-043", "HAM-029") ~ "Carrolls Bay",
-  TRUE ~ NA_character_ # Default to NA if no match
-)
-
-#distance to shoreline code
-
-# ===============================
-# 1. Distance to Shoreline
-# ===============================
-
-# Convert shoreline polygon to boundary
-shoreline_boundary <- st_boundary(shorelinemap)
-# Calculate distance from points to shoreline boundary
-PA_rand_sf <- st_as_sf(
-  PA_rand_w_depthSAVfetch,
-  coords = c("rand_long", "rand_lat"),
-  crs = 4326,        # <- set this to your actual CRS (e.g. 4326 if lat/long WGS84)
-  remove = FALSE      # keep rand_long/rand_lat as regular columns too
-)
-PA_rand_sf <- st_transform(PA_rand_sf, st_crs(shoreline_boundary))
-
-dist_to_shore <- st_distance(PA_rand_sf, shoreline_boundary)
-# Extract distances
-PA_rand_w_depthSAVfetch$dist_to_shoreline_m <- as.numeric(dist_to_shore[,1])
-colnames(PA_rand_w_depthSAVfetch)
-
-
-
-#####distance to shroeline and zone area added
-#saveRDS(PA_rand_w_depthSAVfetch, file = "01_data/02_processed_files/PA_rand_w_depthSAVfetchDISTtoshoreZone.rds")
-
-colnames(PA_rand_w_depthSAVfetch)
+#################################
 
 pa_data <- PA_rand_w_depthSAVfetch %>%
   sf::st_drop_geometry() %>%
-  dplyr::select(presence, depth_m, SAV, season, thermal, zone, depth_m, fetch, dist_to_shoreline_m, rand_long, rand_lat) %>%
+  dplyr::select(presence, depth_m, SAV, season, thermal, zone, fetch, dist_to_shoreline_m, rand_long, rand_lat) %>%
   mutate(
     presence = factor(presence, levels = c(0, 1), labels = c("abs", "pres")),
     rowID    = seq_len(n())
@@ -187,7 +149,14 @@ imp_df_HH$importance_norm <- normalize(imp_df_HH$importance)
 ggplot(imp_df_HH, aes(y = feature_label, x = importance_norm, fill = importance_norm)) +
   geom_bar(stat = "identity", position = "dodge") +
   scale_fill_gradient(low = "darkorchid1", high = "darkorchid4") +
-  ylab("Feature") + xlab("Importance") + guides(fill = "none") + theme_bw()
+  ylab("Feature") + xlab("Importance") + guides(fill = "none") +
+  theme_bw() +
+  theme(
+    axis.text.x  = element_text(size = 14),
+    axis.text.y  = element_text(size = 14),
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16)
+  )
 
 top_1_pdp_HH <- pdp::partial(results_HH, pred.var = imp_df_HH[1, 1], prob = TRUE,
                               train = pa_data.train, progress = "text", which.class = 2)
@@ -197,6 +166,8 @@ top_3_pdp_HH <- pdp::partial(results_HH, pred.var = imp_df_HH[3, 1], prob = TRUE
                               train = pa_data.train, progress = "text", which.class = 2)
 top_4_pdp_HH <- pdp::partial(results_HH, pred.var = imp_df_HH[4, 1], prob = TRUE,
                               train = pa_data.train, progress = "text", which.class = 2)
+top_5_pdp_HH <- pdp::partial(results_HH, pred.var = imp_df_HH[5, 1], prob = TRUE,
+                              train = pa_data.train, progress = "text", which.class = 2)
 top_6_pdp_HH <- pdp::partial(results_HH, pred.var = imp_df_HH[6, 1], prob = TRUE,
                               train = pa_data.train, progress = "text", which.class = 2)
 top_7_pdp_HH <- pdp::partial(results_HH, pred.var = imp_df_HH[7, 1], prob = TRUE,
@@ -205,23 +176,53 @@ top_7_pdp_HH <- pdp::partial(results_HH, pred.var = imp_df_HH[7, 1], prob = TRUE
 
 ggplot(top_1_pdp_HH, aes(x = dist_to_shoreline_m, y = yhat)) +
   geom_smooth(col = "purple", method = "gam") +
-  theme_bw() + xlab("distance to shoreline (m)") + ylab(bquote("Marginal effect" ~ (hat(y))))
+  theme_bw() + xlab("distance to shoreline (m)") + ylab(bquote("Marginal effect" ~ (hat(y))))+
+    theme(
+    axis.text.x  = element_text(size = 14),
+    axis.text.y  = element_text(size = 14),
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16)
+  )
+
 
 ggplot(top_3_pdp_HH, aes(x = fetch, y = yhat)) +
   geom_smooth(col = "purple", method = "gam") +
   theme_bw() + xlab("fetch") + ylab(bquote("Marginal effect" ~ (hat(y))))
 
-ggplot(top_4_pdp_HH, aes(x = depth_m, y = yhat)) +
+ggplot(top_4_pdp_HH, aes(x = fetch, y = yhat)) +
   geom_smooth(col = "purple", method = "gam") +
-  theme_bw() + xlab("depth (m)") + ylab(bquote("Marginal effect" ~ (hat(y))))
+  theme_bw() + xlab("depth (m)") + ylab(bquote("Marginal effect" ~ (hat(y))))+
+      theme(
+    axis.text.x  = element_text(size = 14),
+    axis.text.y  = element_text(size = 14),
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16)
+  )
 
-ggplot(top_4_pdp_HH, aes(x = depth_m, y = yhat)) +
+
+ggplot(top_5_pdp_HH, aes(x = depth_m, y = yhat)) +
   geom_smooth(col = "purple", method = "gam") +
-  theme_bw() + xlab("depth (m)") + ylab(bquote("Marginal effect" ~ (hat(y))))
+  theme_bw() + xlab("depth (m)") + ylab(bquote("Marginal effect" ~ (hat(y))))+
+        theme(
+    axis.text.x  = element_text(size = 14),
+    axis.text.y  = element_text(size = 14),
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16)
+  )
+
+
 
 ggplot(top_6_pdp_HH, aes(x = SAV, y = yhat)) +
   geom_smooth(col = "purple", method = "gam") +
-  theme_bw() + xlab("SAV %") + ylab(bquote("Marginal effect" ~ (hat(y))))
+  theme_bw() + xlab("SAV %") + ylab(bquote("Marginal effect" ~ (hat(y))))+
+          theme(
+    axis.text.x  = element_text(size = 14),
+    axis.text.y  = element_text(size = 14),
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16)
+  )
+
+
 
 #someth9ing going on with zone its all .5 across the board
 ggplot(top_7_pdp_HH, aes(x = zone, y = yhat)) +

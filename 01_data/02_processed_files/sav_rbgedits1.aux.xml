@@ -1,6 +1,6 @@
 <PAMDataset>
   <PAMRasterBand band="1">
-    <Description>SAV_rbgedits</Description>
+    <Description>sav_rbgedits1</Description>
     <Metadata>
       <MDI key="STATISTICS_COUNT">9035.000000</MDI>
       <MDI key="STATISTICS_EXCLUDEDVALUES"></MDI>
