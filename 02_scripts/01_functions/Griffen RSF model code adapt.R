@@ -57,6 +57,8 @@ PA_rand_w_depthSAVfetch$rowID <- seq_len(nrow(PA_rand_w_depthSAVfetch))
 
 set.seed(1234)
 
+is.na(PA_rand_w_depthSAVfetch$zone)
+
 levels(as.factor(PA_rand_w_depthSAVfetch$presence))
 PA_rand_w_depthSAVfetch$thermal<-as.factor(PA_rand_w_depthSAVfetch$thermal)
 PA_rand_w_depthSAVfetch$season<-as.factor(PA_rand_w_depthSAVfetch$season)
@@ -184,14 +186,39 @@ ggplot(top_1_pdp_HH, aes(x = dist_to_shoreline_m, y = yhat)) +
     axis.title.y = element_text(size = 16)
   )
 
+ggplot(top_2_pdp_HH, aes(x = factor(season, levels = c("Spring", "Summer", "Winter", "Fall")), y = yhat)) +
+  geom_col(fill = "purple", col = "purple4") +
+  theme_bw() + xlab("Season") + ylab(bquote("Marginal effect" ~ (hat(y)))) +
+  theme(
+    axis.text.x  = element_text(size = 14),
+    axis.text.y  = element_text(size = 14),
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16)
+  )
 
-ggplot(top_3_pdp_HH, aes(x = fetch, y = yhat)) +
-  geom_smooth(col = "purple", method = "gam") +
-  theme_bw() + xlab("fetch") + ylab(bquote("Marginal effect" ~ (hat(y))))
+
+#NAS in the zone so need to go back to where this was assigned to PA dataframe to check whats missing
+
+zone_levels <- c("Cootes Paradise", "Grindstone", "Carrolls Bay", "Bayfront area",
+                 "West End", "North shore", "Central", "East End")
+
+top_3_pdp_HH$zone <- as.character(top_3_pdp_HH$zone)
+top_3_pdp_HH$zone[is.na(top_3_pdp_HH$zone)] <- "North shore"
+top_3_pdp_HH$zone <- factor(top_3_pdp_HH$zone, levels = zone_levels)
+
+ggplot(top_3_pdp_HH, aes(x = zone, y = yhat)) +
+  geom_col(fill = "purple", col = "purple4") +
+  theme_bw() + xlab("Zone") + ylab(bquote("Marginal effect" ~ (hat(y)))) +
+  theme(
+    axis.text.x  = element_text(size = 14, angle = 35, hjust = 1),
+    axis.text.y  = element_text(size = 14),
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16)
+  )
 
 ggplot(top_4_pdp_HH, aes(x = fetch, y = yhat)) +
   geom_smooth(col = "purple", method = "gam") +
-  theme_bw() + xlab("depth (m)") + ylab(bquote("Marginal effect" ~ (hat(y))))+
+  theme_bw() + xlab("Fetch") + ylab(bquote("Marginal effect" ~ (hat(y))))+
       theme(
     axis.text.x  = element_text(size = 14),
     axis.text.y  = element_text(size = 14),
@@ -222,119 +249,311 @@ ggplot(top_6_pdp_HH, aes(x = SAV, y = yhat)) +
     axis.title.y = element_text(size = 16)
   )
 
-
-
-#someth9ing going on with zone its all .5 across the board
-ggplot(top_7_pdp_HH, aes(x = zone, y = yhat)) +
-stat_summary(fun = mean, geom = "bar", fill = "purple", col = "black", alpha = 0.7) +
-stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.1) +
-theme_bw() +
-xlab("Zone") +
-ylab(bquote("Marginal effect" ~ (hat(y)))) +
-theme(
-axis.text.x = element_text(color = "black", angle = 35, vjust = 1, hjust = 1),
-axis.text.y = element_text(color = "black")) 
-
-
-#calculate interaction strenghts across all predictors and plot marginal effects of the top two-way interaction 
-#Sub-sample and re-run model to reduce computational times when
-# determining the top two-way interaction variables.
+###################################
+## ---- Interaction strengths (sub-sampled) ----
 set.seed(1234)
-# Sub-sample and re-run model to reduce computational times when
-# determining the top two-way interaction variables.
-set.seed(1234)
-pa_data.train_sub <- pa_data.train %>% mutate(rowID = seq(1:nrow(pa_data.train)))
-pa_data.train_sub_f <- pa_data.train_sub[sample(1:nrow(pa_data.train_sub),
-                                                  nrow(pa_data.train_sub) * 0.25, replace = FALSE), ]
-X_HH_sub <- pa_data.train_sub_f %>% dplyr::select(-c(presence, rowID))
+pa_data.train_sub_f <- pa_data.train[sample(nrow(pa_data.train),
+                                            round(nrow(pa_data.train) * 0.25)), ]
+X_HH_sub <- dplyr::select(pa_data.train_sub_f, -presence)
 
-# Create 'Predictor' object to interpret findings via the iml package.
 predictor_HH_sub <- Predictor$new(model_rf.Bin_HH, data = X_HH_sub,
-                                   y = pa_data.train_sub_f$presence)
-# Create 'Predictor' object to interpret findings via the iml
-# package.
-predictor_rudd_sub <- Predictor$new(model_rf.Bin_HH, data = X_HH_sub,
-y = pa_data.train_sub_f$presf)
+                                  y = pa_data.train_sub_f$presence)
 
-interact_HH_sub <- Interaction$new(predictor_HH_sub) %>% plot() +
-  ggtitle("Interaction strengths")
+# keep the Interaction object separate from its plot
+interact_all <- Interaction$new(predictor_HH_sub)
+plot(interact_all) + ggtitle("Interaction strengths")
 
-interact_HH_sub
+interact_results_HH <- interact_all$results %>%
+  group_by(.feature) %>%
+  summarise(H = mean(.interaction)) %>%
+  rename(feature = .feature) %>%
+  arrange(desc(H)) %>%
+  as.data.frame()
 
-(interact_results_HH <- interact_HH_sub$data %>%
-   group_by(.feature) %>%
-   summarise(H = mean(.interaction)) %>%
-   rename(feature = .feature) %>%
-   as.data.frame() %>%
-   arrange(desc(H)))
+# 2-way interactions with the strongest-interacting feature
+interact_top_1_HH <- Interaction$new(predictor_HH_sub,
+                                     feature = interact_results_HH$feature[1])
 
-  (interact_top_1_HH <- iml::Interaction$new(predictor_HH_sub,
-                                            feature = interact_results_HH$feature[1]))
+interact_top_1_HH_df <- interact_top_1_HH$results %>%
+  group_by(.feature) %>%
+  summarise(H = mean(.interaction)) %>%
+  rename(feature = .feature) %>%
+  arrange(desc(H)) %>%
+  separate(feature, into = c("top1", "top2"), sep = ":") %>%
+  as.data.frame()
 
-(interact_top_1_HH_df <- interact_top_1_HH$results %>%
-   group_by(.feature) %>%
-   summarise(H = mean(.interaction)) %>%
-   rename(feature = .feature) %>%
-   as.data.frame() %>%
-   arrange(desc(H)) %>%
-   separate(col = feature, into = c("top1", "top2"), sep = "\\:"))
+interact_top_1_HH_df   # check this: top row is your strongest pair
+
+library(purrr)
+library(patchwork)   # install.packages("patchwork") if needed
+
+season_lv   <- c("Spring", "Summer", "Fall", "Winter")
+season_cols <- c(Spring = "#ffb3ba", Summer = "#a8e6cf",
+                 Fall   = "#f9c8a0", Winter = "#85c1e9")
+
+# the six predictors paired with season, in order of interaction strength
+vars <- interact_top_1_HH_df$top1
+
+# nicer axis labels
+xlabs <- c(fetch = "Fetch", zone = "Zone", depth_m = "Depth (m)",
+           dist_to_shoreline_m = "Distance to shoreline (m)",
+           thermal = "Thermal period", SAV = "SAV %")
+
+# compute all six 2-way PDPs
+vars <- interact_top_1_HH_df$top1   # must exist before the loop
+
+pdp_list <- purrr::map(purrr::set_names(vars), function(v) {
+  pdp::partial(results_HH,
+               pred.var        = c(v, "season"),
+               prob            = TRUE,
+               which.class     = 2,
+               train           = pa_data.train,
+               grid.resolution = 30,
+               progress        = "none")
+})
 
 
-#season dist to shoreline
-summary(pa_data.train$dist_to_shoreline_m)
+conflicted::conflict_prefer("map", "purrr")
+conflicted::conflict_prefer("imap", "purrr")
+conflicted::conflict_prefer("set_names", "purrr")
+y_rng <- range(unlist(purrr::map(pdp_list, ~ range(.x$yhat))))
 
-top_int_1_pdp_df_HH <- results_HH %>%
-  pdp::partial(pred.var = c(interact_top_1_HH_df$top1[1], interact_top_1_HH_df$top2[1]),
-               prob = TRUE, which.class = 2,
-               progress = "text", train = pa_data.train)
+# shared y-range so panels are comparable (drop this to let each panel scale freely)
+plots <- purrr::imap(pdp_list, ~ plot_pdp(.x, .y))
 
-top_int_1_pdp_df_HH$Variable <- paste(top_int_1_pdp_df_HH$season, top_int_1_pdp_df_HH$dist_to_shoreline_m)
-top_int_1_pdp_df_HH$Inter_Variable <- "Season_DistShoreline"
+plot_pdp <- function(df, v) {
+  df$season <- factor(df$season, levels = season_lv)
 
+  base <- theme_bw() +
+    theme(axis.text  = element_text(size = 12),
+          axis.title = element_text(size = 14),
+          legend.text  = element_text(size = 12),
+          legend.title = element_text(size = 14))
 
-top_int_1_pdp_df_HH_bins_Dist <- cut(
-  top_int_1_pdp_df_HH$dist_to_shoreline_m,
-  breaks = c(0, 500, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12000, 13000),
-  labels = c("0-500", "500-1000", "1-2km", "2-3km", "3-4km", "4-5km",
-             "5-6km", "6-7km", "7-8km", "8-9km", "9-10km", "10-11km", "11-12km", "12-13km")
-)
-top_int_1_pdp_df_HH$bins_Dist <- top_int_1_pdp_df_HH_bins_Dist
-
-breaks = c(0, 2000, 4000, 6000, 8000, 10000, 12000, 13000)
-labels = c("0-2km", "2-4km", "4-6km", "6-8km", "8-10km", "10-12km", "12-13km")
-top_int_1_pdp_df_HH$bins_Dist <- top_int_1_pdp_df_HH_bins_Dist
-
-{
-  top_int_1_pdp_df_HH_mean <-
-    top_int_1_pdp_df_HH %>%
-    data.frame() %>%
-    group_by(bins_Dist, season) %>%
-    summarise(ci = list(mean_cl_normal(yhat) %>%
-                           rename(mean = y, lwr = ymin, upr = ymax))) %>%
-    unnest() %>%
-    mutate(variance = (upr - lwr))
-
-  ggplot(top_int_1_pdp_df_HH_mean, aes(season, bins_Dist)) +
-    geom_tile(aes(fill = mean), width = 1, height = .9) +
-    scale_fill_gradient(low = "white", high = "steelblue", breaks = seq(0, 1, by = 1)) +
-    theme_classic() +
-    xlab("Season") +
-    ylab("Distance to shoreline (m)") +
-    theme(
-      axis.text.y = element_text(colour = "black"),
-      axis.text.x = element_text(angle = 35, hjust = 1, colour = "black"),
-      strip.text = element_text(face = "bold", size = 8, lineheight = 5.0),
-      legend.position = "right"
-    ) +
-    labs(fill = "Mean Marginal effect" ~ (hat(y))) 
+  if (is.numeric(df[[v]])) {
+    # continuous predictor: one line per season
+    ggplot(df, aes(x = .data[[v]], y = yhat, colour = season, group = season)) +
+      geom_smooth(method="gam", alpha=0.2, linewidth=1.1) +
+      scale_colour_manual(values = season_cols) +
+      scale_fill_manual(values=season_cols)+
+      labs(x = xlabs[[v]], y = bquote("Marginal effect" ~ (hat(y))),
+           colour = "Season") +
+      coord_cartesian(ylim = y_rng) +
+      base
+  } else {
+    # categorical predictor: grouped bars, season as fill
+    ggplot(df, aes(x = .data[[v]], y = yhat, fill = season)) +
+      geom_col(position = position_dodge(width = 0.8), width = 0.75) +
+      scale_fill_manual(values = season_cols) +
+      labs(x = xlabs[[v]], y = bquote("Marginal effect" ~ (hat(y))),
+           fill = "Season") +
+      coord_cartesian(ylim = c(0, y_rng[2])) +
+      base +
+      theme(axis.text.x = element_text(angle = 35, hjust = 1))
+  }
 }
+
+plots <- imap(pdp_list, ~ plot_pdp(.x, .y))
+
+# combined figure with one shared legend
+wrap_plots(plots, ncol = 2, guides = "collect") &
+  theme(legend.position = "bottom")
+
+ggsave("pdp_season_interactions.png", width = 11, height = 12, dpi = 300)
+
+#top 3 two-way interaction plots as grids 
+#could you add season as a colour?
 
 
 #next will be building the predictive raster layer 
 #first need to figure out whats going on with zone OR drop it 
 #starting at page 17 of Griffin et al. appendix data sheet 1
 
+library(patchwork)
+
+season_lv <- c("Spring", "Summer", "Fall", "Winter")
+zone_levels <- c("Cootes Paradise", "Grindstone", "Carrolls Bay", "Bayfront area",
+                 "West End", "North shore", "Central", "East End")
+
+xlabs <- c(fetch = "Fetch", zone = "Zone", depth_m = "Depth (m)",
+           dist_to_shoreline_m = "Distance to shoreline (m)",
+           thermal = "Thermal period", SAV = "SAV %")
+
+# bin the predictor (continuous only) and average yhat per bin x season
+make_grid_df <- function(df, v, n_bins = 8) {
+  df$season <- factor(df$season, levels = season_lv)
+
+  if (is.numeric(df[[v]])) {
+    brks <- seq(min(df[[v]]), max(df[[v]]), length.out = n_bins + 1)
+    df$bin <- cut(df[[v]], breaks = brks, include.lowest = TRUE, dig.lab = 4)
+  } else {
+    df$bin <- if (v == "zone") factor(df[[v]], levels = zone_levels) else factor(df[[v]])
+  }
+
+  df %>%
+    data.frame() %>%
+    dplyr::group_by(bin, season) %>%
+    dplyr::summarise(mean = mean(yhat), .groups = "drop")
+}
+
+grid_list <- lapply(names(pdp_list), function(v) make_grid_df(pdp_list[[v]], v))
+names(grid_list) <- names(pdp_list)
+
+# common colour scale across panels so they are comparable
+fill_rng <- range(unlist(lapply(grid_list, function(d) range(d$mean))))
+
+plot_grid <- function(d, v) {
+  ggplot(d, aes(x = season, y = bin, fill = mean)) +
+    geom_tile(width = 1, height = 0.9) +
+    scale_fill_gradient(low = "white", high = "steelblue", limits = fill_rng) +
+    labs(x = "Season", y = xlabs[[v]],
+         fill = bquote("Mean marginal effect" ~ (hat(y)))) +
+    theme_classic() +
+    theme(axis.text.y = element_text(colour = "black", size = 11),
+          axis.text.x = element_text(angle = 35, hjust = 1, colour = "black", size = 12),
+          axis.title  = element_text(size = 14),
+          legend.text = element_text(size = 12),
+          legend.title = element_text(size = 12))
+}
+
+grid_plots <- Map(plot_grid, grid_list, names(grid_list))
+
+wrap_plots(grid_plots, ncol = 2, guides = "collect") &
+  theme(legend.position = "right")
+
+ggsave("pdp_season_grids.png", width = 11, height = 12, dpi = 300)
 
 
+##############
+
+
+
+
+library(patchwork)
+
+season_lv <- c("Spring", "Summer", "Fall", "Winter")
+
+# 1. Finer PDPs for just these three predictors
+focus <- c(dist_to_shoreline_m = "Distance to shoreline (m)",
+           depth_m             = "Depth (m)",
+           SAV                 = "SAV %")
+
+pdp_focus <- lapply(setNames(names(focus), names(focus)), function(v) {
+  pdp::partial(results_HH,
+               pred.var        = c(v, "season"),
+               prob            = TRUE,
+               which.class     = 2,
+               train           = pa_data.train,
+               grid.resolution = 60,
+               progress        = "none")
+})
+
+# 2. Grid plot function: own fill scale, optional custom breaks
+plot_season_grid <- function(df, v, label, breaks = NULL, n_bins = 10,
+                             show_values = FALSE) {
+  df$season <- factor(df$season, levels = season_lv)
+
+  if (is.null(breaks)) {
+    breaks <- seq(min(df[[v]]), max(df[[v]]), length.out = n_bins + 1)
+  }
+  df$bin <- cut(df[[v]], breaks = breaks, include.lowest = TRUE, dig.lab = 4)
+
+  if (anyNA(df$bin)) warning(v, ": some values fall outside your breaks")
+
+  d <- df %>%
+    data.frame() %>%
+    dplyr::filter(!is.na(bin)) %>%
+    dplyr::group_by(bin, season) %>%
+    dplyr::summarise(mean = mean(yhat), .groups = "drop")
+
+  p <- ggplot(d, aes(x = season, y = bin, fill = mean)) +
+    geom_tile(width = 1, height = 0.95) +
+    scale_fill_gradient(low = "white", high = "steelblue") +   # free scale, per plot
+    labs(x = "Season", y = label,
+         fill = bquote("Mean marginal effect" ~ (hat(y)))) +
+    theme_classic() +
+    theme(axis.text.y  = element_text(colour = "black", size = 12),
+          axis.text.x  = element_text(angle = 35, hjust = 1, colour = "black", size = 12),
+          axis.title   = element_text(size = 14),
+          legend.text  = element_text(size = 12),
+          legend.title = element_text(size = 12))
+
+  if (show_values) {
+    p <- p + geom_text(aes(label = sprintf("%.2f", mean)), size = 3)
+  }
+  p
+}
+
+# 3. Plot each one separately
+p_dist  <- plot_season_grid(pdp_focus$dist_to_shoreline_m, "dist_to_shoreline_m",
+                            focus[["dist_to_shoreline_m"]], n_bins = 12)
+p_depth <- plot_season_grid(pdp_focus$depth_m, "depth_m",
+                            focus[["depth_m"]], n_bins = 10)
+p_sav   <- plot_season_grid(pdp_focus$SAV, "SAV",
+                            focus[["SAV"]], n_bins = 10)
+
+p_dist
+p_depth
+p_sav
+
+ggsave("pdp_grid_dist_shoreline.png", p_dist,  width = 6, height = 6, dpi = 300)
+ggsave("pdp_grid_depth.png",          p_depth, width = 6, height = 6, dpi = 300)
+ggsave("pdp_grid_SAV.png",            p_sav,   width = 6, height = 6, dpi = 300)
 
 #temporal blocking ?? i.e. spring/summer/winter/fall or thermocline isoline?
+
+
+
+##############################
+## ---- 1. AUC: test set vs spatial CV ----
+auc_test <- mlr::performance(pred_HH, measures = mlr::auc)
+auc_test
+
+tune_HH$y          # spatial CV AUC for the best hyperparameters (auc.test.mean)
+
+# If the test AUC is clearly higher than the spatial CV AUC, the random
+# test split is probably flattering the model (spatial autocorrelation).
+
+
+## ---- 2. ROC curve (test set) ----
+roc_df <- mlr::generateThreshVsPerfData(
+  pred_HH, measures = list(mlr::fpr, mlr::tpr, mlr::tnr)
+)$data
+
+ggplot(roc_df, aes(x = fpr, y = tpr)) +
+  geom_abline(linetype = "dashed", colour = "grey50") +
+  geom_line(colour = "purple", linewidth = 1.2) +
+  coord_equal() +
+  labs(x = "False positive rate (1 - specificity)",
+       y = "True positive rate (sensitivity)",
+       title = sprintf("Test-set ROC (AUC = %.3f)", auc_test)) +
+  theme_bw() +
+  theme(axis.text  = element_text(size = 14),
+        axis.title = element_text(size = 16))
+
+
+## ---- 3. Choose a threshold from spatial CV predictions (not the test set) ----
+set.seed(1234)
+rs <- mlr::resample(lrn_rf.Bin, task.train, resampling = perf_level,
+                    measures = mlr::auc, show.info = FALSE)
+rs$aggr   # pooled spatial CV AUC
+
+cv_thr <- mlr::generateThreshVsPerfData(
+  rs$pred, measures = list(mlr::tpr, mlr::tnr)
+)$data
+
+# Youden's J / TSS = sensitivity + specificity - 1
+cv_thr$TSS <- cv_thr$tpr + cv_thr$tnr - 1
+best_thr   <- cv_thr$threshold[which.max(cv_thr$TSS)]
+best_thr
+
+ggplot(cv_thr, aes(x = threshold, y = TSS)) +
+  geom_line(linewidth = 1.1, colour = "purple") +
+  geom_vline(xintercept = best_thr, linetype = "dashed") +
+  theme_bw() +
+  labs(x = "Probability threshold", y = "TSS (sens + spec - 1)")
+
+
+## ---- 4. Confusion matrix on the test set at that threshold ----
+pred_HH_thr <- mlr::setThreshold(pred_HH, best_thr)
+(performance_HH_thr <- mlr::calculateROCMeasures(pred_HH_thr))
