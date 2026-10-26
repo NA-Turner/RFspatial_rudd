@@ -480,35 +480,52 @@ det_randomized <- PA_rand_w_depthSAV |>
 #save for now can delete later once we add in more variables 
 #saveRDS(det_randomized, "c:/Users/TURNERN/Documents/For Github/RFspatial_rudd/01_data/02_processed_files/PA_rand_w_depthSAVfetch.rds")
 
-
+head(PA_rand_w_depthSAVfetch)
 ##adding in distance to shoreline
-
+PA_rand_w_depthSAVfetch$rand_lat
 #distance to shoreline code
 
 # ===============================
 # 1. Distance to Shoreline
 # ===============================
+######################
+library(sf)
+library(dplyr)
 
-# Convert shoreline polygon to boundary
-shoreline_boundary <- st_boundary(shorelinemap)
-# Calculate distance from points to shoreline boundary
-PA_rand_sf <- st_as_sf(
-  det_randomized,
+# Convert your locations to an sf point object
+locations_sf <- st_as_sf(
+  PA_rand_w_depthSAVfetch,
   coords = c("rand_long", "rand_lat"),
-  crs = 4326,        # <- set this to your actual CRS (e.g. 4326 if lat/long WGS84)
-  remove = FALSE      # keep rand_long/rand_lat as regular columns too
+  crs = 4326,  # WGS 84
+  remove = FALSE
 )
-PA_rand_sf <- st_transform(PA_rand_sf, st_crs(shoreline_boundary))
 
-dist_to_shore <- st_distance(PA_rand_sf, shoreline_boundary)
-# Extract distances
-det_randomized$dist_to_shoreline_m <- as.numeric(dist_to_shore[,1])
-colnames(det_randomized)
+# Transform both datasets to UTM Zone 17N (metres)
+locations_utm <- st_transform(locations_sf, 32617)
+shoreline_utm <- st_transform(shorelinemap, 32617)
 
+# Dissolve polygons to remove boundaries between adjacent polygons
+shoreline_union <- st_union(shoreline_utm)
 
+# Extract the boundary of the combined polygon geometry
+shoreline_boundary <- st_boundary(shoreline_union)
+
+# Calculate distance to the nearest polygon boundary
+PA_rand_w_depthSAVfetch$shoreline_distance_m <- as.numeric(
+  st_distance(locations_utm, shoreline_boundary)
+)
+
+#check to make sure the distance to shoreline worked
+ggplot() + HH_plot+
+  geom_sf(data = PA_rand_w_depthSAVfetch,
+          size = 1, alpha = 0.7, aes(color=shoreline_distance_m)) +
+  theme_minimal() +
+  labs(
+    x = "Longitude", y = "Latitude"
+  )
 ##add zone variable 
 
-#add 'zones' which will be the same rec groupings we did for goldfish 
+#add 'zones' which will be the same rec groupings we did for goldfish see Turner et al. 2026
 
 det_randomized$zone <- case_when(
   det_randomized$station %in% c("HAM-053", "HAM-051","HAM-036","HAM-082", "HAM-081") ~ "Bayfront area",
@@ -529,14 +546,13 @@ det_randomized$zone <- case_when(
 #dataframe now has:
 #thermal, year, month, day, season, depth, SAV, fetch, distance to shoreline, zone area
 
-#should we assign zone based on mean clustering analsys ???
 #run a correlation matrix
 
 library(dplyr)
 library(corrplot)
 
 # 1. Select only the numeric explanatory variables (drop the response, IDs, etc.)
-predictors <- det_randomized %>%
+predictors <- PA_rand_w_depthSAVfetch %>%
   select(where(is.numeric)) %>%
   select(-c(presence))   # <- replace with your response / non-predictor columns
 
@@ -571,3 +587,6 @@ high_cor
 ##### save for use in random forest analysis
 #saveRDS(det_randomized, file = "01_data/02_processed_files/PArand_complete.rds")
 #move to RF model code r. script
+
+
+

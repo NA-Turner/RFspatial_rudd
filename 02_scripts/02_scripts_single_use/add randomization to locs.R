@@ -249,14 +249,12 @@ ggplot() +
 
 
 #save as an rds file 
-
-
 #saveRDS(det_randomized, "c:/Users/TURNERN/Documents/For Github/RFspatial_rudd/01_data/02_processed_files/PAdata_randomized.rds")
+
 pa_data<-readRDS("01_data/02_processed_files/PAdata_randomized.rds")
-
-#################################################################################
-
+##################################################
 # fish as an example
+
 pa_data$transmitter_id
 rudd512<-filter(pa_data, transmitter_id=="512")
 rudd512 <- st_as_sf(rudd512)
