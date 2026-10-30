@@ -457,7 +457,6 @@ imp_df_HH$feature_label <- ifelse(imp_df_HH$feature == "depth_m", "Depth (m)",
 library(spdep)
 library(gstat)
 
-
 obs   <- as.numeric(pa_data.train$presence == "pres")
 p_oob <- results_HH$predictions[, "pres"]
 
@@ -496,10 +495,19 @@ vg_fit <- fit.variogram(vg, vgm(0.7 * max(vg$gamma), "Sph", 1000, min(vg$gamma))
 plot(vg, vg_fit); vg_fit
 
 # d) Map the residuals
+#map of residuals for PA data
+#want to see an even spread of blue and red across the lake
+
 ggplot(cbind(resid_sf, xy), aes(X, Y, colour = resid)) +
   geom_point(size = 0.8) +
   scale_colour_gradient2(low = "blue", mid = "grey90", high = "red") +
   coord_equal()
+
+
+# quantify by zone to determine if there is a zone-level bias
+d <- data.frame(zone = pa_data$zone[as.integer(rownames(pa_data.train))],
+                resid = obs - p_oob)
+aggregate(resid ~ zone, d, function(x) c(mean = mean(x), se = sd(x)/sqrt(length(x))))
 
 
 library(blockCV)
@@ -599,9 +607,30 @@ out <- do.call(rbind, lapply(1:5, function(sd) {
 }))
 colMeans(out[-1])
 
+#####################
+#looking into receiver variance and clustering 
+# rec = receiver ID for each training row, in the same order as pa_data.train
+d <- data.frame(resid = obs - p_oob, rec = factor(rec))
+m <- lme4::lmer(resid ~ 1 + (1 | rec), data = d)
+vc <- as.data.frame(lme4::VarCorr(m))
+vc$vcov[1] / sum(vc$vcov)          # share of residual variance between receivers
+table(table(rec)) |> head(20)      # how many points per receiver
+
+rx <- aggregate(cbind(rand_long, rand_lat) ~ rec, data = cbind(coords.train, rec), FUN = mean)
+set.seed(1234)
+rx$fold <- kmeans(rx[, c("rand_long", "rand_lat")], centers = 5)$cluster
+fold_of_row <- rx$fold[match(rec, rx$rec)]
+
+folds_rec <- lapply(1:5, function(k) {
+  te <- which(fold_of_row == k)
+  list(setdiff(seq_along(rec), te), te)
+})
+
+res_rec <- tune_rf(pa_data.train, coords.train, folds = folds_rec)
+res_rec$tuned$y
 
 
-# ---- Evaluation and importance (unchanged) ----
+# ---- Evaluation and importance 
 set.seed(1234)
 pred_HH <- predict(model_rf.Bin_HH, task = task.test)
 (performance_HH <- calculateROCMeasures(pred_HH))
@@ -805,3 +834,5 @@ plots <- purrr::imap(pdp_list, ~ plot_pdp(.x, .y))
 
 wrap_plots(plots, ncol = 2, guides = "collect") &
   theme(legend.position = "bottom")
+
+

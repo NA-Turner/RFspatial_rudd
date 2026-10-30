@@ -13,7 +13,7 @@ library(ranger)
 library(iml)
 library(pdp)
 library(sf)
-
+library(imp)
 
 #predictors October 2026
 
@@ -59,25 +59,26 @@ set.seed(1234)
 
 is.na(PA_rand_w_depthSAVfetch$zone)
 
-levels(as.factor(PA_rand_w_depthSAVfetch$presence))
-PA_rand_w_depthSAVfetch$thermal<-as.factor(PA_rand_w_depthSAVfetch$thermal)
-PA_rand_w_depthSAVfetch$season<-as.factor(PA_rand_w_depthSAVfetch$season)
-PA_rand_w_depthSAVfetch$presence<-as.factor(PA_rand_w_depthSAVfetch$presence)
+levels(base::as.factor(PA_rand_w_depthSAVfetch$presence))
+PA_rand_w_depthSAVfetch$thermal<-base::as.factor(PA_rand_w_depthSAVfetch$thermal)
+PA_rand_w_depthSAVfetch$season<-base::as.factor(PA_rand_w_depthSAVfetch$season)
+PA_rand_w_depthSAVfetch$presence<-base::as.factor(PA_rand_w_depthSAVfetch$presence)
 
 #################################
 
 pa_data <- PA_rand_w_depthSAVfetch %>%
   sf::st_drop_geometry() %>%
-  dplyr::select(presence, depth_m, SAV, season, thermal, zone, fetch, dist_to_shoreline_m, rand_long, rand_lat) %>%
+  dplyr::select(presence, depth_m, SAV, season, zone, fetch, shoreline_distance_m, rand_long, rand_lat) %>%
   mutate(
     presence = factor(presence, levels = c(0, 1), labels = c("abs", "pres")),
     rowID    = seq_len(n())
   )
-pa_data$zone<-as.factor(pa_data$zone)
+pa_data$zone<-base::as.factor(pa_data$zone)
 
 #split into train and test data
 #change % split right now at 60% train 
-pa_data.train <- pa_data[sample(1:nrow(pa_data), nrow(pa_data) * 0.6, replace = FALSE), ]
+set.seed(1234)
+pa_data.train <- pa_data[sample(1:nrow(pa_data), nrow(pa_data) * 0.7, replace = FALSE), ]
 pa_data.test  <- pa_data[!(pa_data$rowID %in% pa_data.train$rowID), ]
 
 
@@ -94,163 +95,267 @@ task.test  <- makeClassifTask(data = pa_data.test, target = "presence",
 
 
 
-# Learner
-lrn.Bin <- makeLearner(cl = "classif.ranger", predict.type = "prob")
+# defines model
+#can adjust number of trees here
+lrn.Bin <- makeLearner(cl = "classif.ranger", predict.type = "prob", num.trees=1000)
 
 # Spatial CV + random hyperparameter search
+#SpCV clusters training points by coordiantes (k-means) into 5 groups
+#each round holds out one of the groups and trains on the other 4
+#i.e. validation points are geographically separated from training points 
 perf_level <- makeResampleDesc("SpCV", iters = 5)
+
+#tries 50 random coos of 3 hyperparameters
 ctrl <- makeTuneControlRandom(maxit = 50L)
 
+#mtry = how many predictors each split considers
+# sample.fraction = fraction of the data each tree sees
+# min.node.size = min size of terminal node 
 ps <- makeParamSet(
   makeIntegerParam("mtry", lower = 1, upper = ncol(pa_data.train) - 1),
   makeNumericParam("sample.fraction", lower = 0.2, upper = 0.9),
   makeIntegerParam("min.node.size", lower = 1, upper = 10)
 )
 
+#run tuning 
 set.seed(1234)
 tune_HH <- tuneParams(learner = lrn.Bin, task = task.train,
                        resampling = perf_level, par.set = ps,
                        control = ctrl, measures = mlr::auc)
 
+##############################
+##
+##
+##finding a sufficient number of trees for model
+best <- tune_HH$x   # mtry, sample.fraction, min.node.size
+tree_grid <- c(100, 250, 500, 750, 1000, 1500, 2000, 3000, 5000)
+
+oob_curve <- lapply(tree_grid, function(nt) {
+  # repeat a few seeds to see run-to-run noise
+  sapply(1:5, function(s) {
+    set.seed(s)
+    rf <- ranger(presence ~ ., data = pa_data.train,
+                 num.trees       = nt,
+                 mtry            = best$mtry,
+                 sample.fraction = best$sample.fraction,
+                 min.node.size   = best$min.node.size,
+                 probability     = TRUE)
+    rf$prediction.error   # OOB Brier score for probability forests
+  })
+})
+
+oob_df <- data.frame(
+  num.trees = rep(tree_grid, each = 5),
+  brier     = unlist(oob_curve)
+)
+
+library(ggplot2)
+ggplot(oob_df, aes(num.trees, brier)) +
+  stat_summary(fun = mean, geom = "line") +
+  stat_summary(fun.data = mean_se, geom = "pointrange") +
+  scale_x_log10() +
+  labs(y = "OOB Brier score", x = "Number of trees")
+
+
+#where mean flattens out, pick a value at or a little past that point 
+#here is would be aout 1000 trees
+
+
+
+
 # Final learner + training
+# new learner is built with hyperparameters that came out on top (from above code)
 lrn_rf.Bin <- setHyperPars(makeLearner("classif.ranger", importance = "impurity",
-                                        predict.type = "prob"), par.vals = tune_HH$x)
+                                        predict.type = "prob", num.trees=1000), par.vals = tune_HH$x)
 set.seed(1234)
-model_rf.Bin_HH <- train(lrn_rf.Bin, task.train)
+model_rf.Bin_HH <- mlr::train(lrn_rf.Bin, task.train)
 results_HH <- mlr::getLearnerModel(model_rf.Bin_HH)
+
 
 set.seed(1234)
 pred_HH <- predict(model_rf.Bin_HH, task = task.test)
 (performance_HH <- calculateROCMeasures(pred_HH))
 
-X_HH <- pa_data.train[which(names(pa_data.train) != "presence")]
+#####################################################################
+#this code creates a plot of the predictors and summarises on a scale of 1 to 0
+##different way to plot predictors importance
+# X_HH <- pa_data.train[which(names(pa_data.train) != "presence")]
 
-predictor_HH <- Predictor$new(model_rf.Bin_HH, data = X_HH, y = pa_data.train$presence)
-imp_HH <- FeatureImp$new(predictor_HH, loss = "ce")
+ #predictor_HH <- Predictor$new(model_rf.Bin_HH, data = X_HH, y = pa_data.train$presence)
+# imp_HH <- FeatureImp$new(predictor_HH, loss = "ce")
 
-imp_df_HH <- imp_HH$results
+# imp_df_HH <- imp_HH$results
 
-# swap in your real predictor names — edit these labels to match what you kept in pa_data
-imp_df_HH$feature_label <- ifelse(imp_df_HH$feature == "depth_m", "Depth (m)",
-                            ifelse(imp_df_HH$feature == "SAV", "SAV",
-                            ifelse(imp_df_HH$feature == "season", "Season",
-                            ifelse(imp_df_HH$feature == "thermal", "Thermal period",
-                            ifelse(imp_df_HH$feature == "dist_to_shoreline_m", "Distance to shoreline",
-                            ifelse(imp_df_HH$feature == "fetch", "Fetch",
-                            ifelse(imp_df_HH$feature == "zone", "Zone",
-                                   imp_df_HH$feature)))))))
+# # swap in your real predictor names — edit these labels to match what you kept in pa_data
+# imp_df_HH$feature_label <- ifelse(imp_df_HH$feature == "depth_m", "Depth (m)",
+#                             ifelse(imp_df_HH$feature == "SAV", "SAV",
+#                             ifelse(imp_df_HH$feature == "season", "Season",
+#                             ifelse(imp_df_HH$feature == "thermal", "Thermal period",
+#                             ifelse(imp_df_HH$feature == "dist_to_shoreline_m", "Distance to shoreline",
+#                             ifelse(imp_df_HH$feature == "fetch", "Fetch",
+#                             ifelse(imp_df_HH$feature == "zone", "Zone",
+#                                    imp_df_HH$feature)))))))
 
 
-ordered <- imp_df_HH %>% arrange(desc(importance)) %>% distinct(feature_label)
-ordered_fin <- ordered$feature_label
-imp_df_HH$feature_label <- factor(imp_df_HH$feature_label, levels = rev(ordered_fin))
+# ordered <- imp_df_HH %>% arrange(desc(importance)) %>% distinct(feature_label)
+# ordered_fin <- ordered$feature_label
+# imp_df_HH$feature_label <- factor(imp_df_HH$feature_label, levels = rev(ordered_fin))
 
-normalize <- function(x) (x - min(x)) / (max(x) - min(x))
-imp_df_HH$importance_norm <- normalize(imp_df_HH$importance)
+# normalize <- function(x) (x - min(x)) / (max(x) - min(x))
+# imp_df_HH$importance_norm <- normalize(imp_df_HH$importance)
 
-ggplot(imp_df_HH, aes(y = feature_label, x = importance_norm, fill = importance_norm)) +
-  geom_bar(stat = "identity", position = "dodge") +
-  scale_fill_gradient(low = "darkorchid1", high = "darkorchid4") +
-  ylab("Feature") + xlab("Importance") + guides(fill = "none") +
+# ggplot(imp_df_HH, aes(y = feature_label, x = importance_norm, fill = importance_norm)) +
+#   geom_bar(stat = "identity", position = "dodge") +
+#   scale_fill_gradient(low = "darkorchid1", high = "darkorchid4") +
+#   ylab("Feature") + xlab("Importance") + guides(fill = "none") +
+#   theme_bw() +
+#   theme(
+#     axis.text.x  = element_text(size = 14),
+#     axis.text.y  = element_text(size = 14),
+#     axis.title.x = element_text(size = 16),
+#     axis.title.y = element_text(size = 16)
+#   )
+
+
+##############other ways to plot out variable importance
+#MSE and brier score, shows how much the model leans on each predictor variable to assist in accurate predictions 
+#of presence absence data 
+mse_imp <- function(rf, test, target = "presence", reps = 30, seed = 1234) {
+  set.seed(seed)
+  obs   <- as.numeric(test[[target]] == "pres")
+  preds <- setdiff(names(test), target)
+
+  mse   <- function(d) mean((obs - predict(rf, data = d)$predictions[, "pres"])^2)
+  base  <- mse(test)                                  # MSE with nothing shuffled
+
+  out <- do.call(rbind, lapply(preds, function(v) {
+    inc <- replicate(reps, {
+      d <- test
+      d[[v]] <- sample(d[[v]])                        # break the predictor-response link
+      mse(d) - base                                   # increase in MSE
+    })
+    data.frame(feature = v, mean_inc = mean(inc),
+               lo = quantile(inc, 0.025), hi = quantile(inc, 0.975),
+               pct_inc = 100 * mean(inc) / base)
+  }))
+  attr(out, "baseline_mse") <- base
+  out
+}
+
+imp_mse <- mse_imp(results_HH, pa_data.test)
+attr(imp_mse, "baseline_mse")      # baseline MSE (Brier) on this data
+sqrt(attr(imp_mse, "baseline_mse"))# baseline RMSE
+
+# Optional nicer labels
+labs_map <- c(zone = "Zone", season = "Season",
+              depth_m = "Depth (m)", fetch = "Fetch", SAV = "SAV %",
+              shoreline_distance_m = "Distance to shoreline (m)")
+imp_mse$label <- ifelse(imp_mse$feature %in% names(labs_map),
+                        labs_map[imp_mse$feature], imp_mse$feature)
+
+ggplot(imp_mse, aes(mean_inc, reorder(label, mean_inc))) +
+  geom_vline(xintercept = 0, linetype = 2) +
+  geom_col(fill = "purple", colour = "purple4", width = 0.7) +
+  geom_errorbarh(aes(xmin = lo, xmax = hi), height = 0.25) +
+  labs(x = "Increase in MSE (Brier score) when predictor is shuffled",
+       y = NULL) +
   theme_bw() +
-  theme(
-    axis.text.x  = element_text(size = 14),
-    axis.text.y  = element_text(size = 14),
-    axis.title.x = element_text(size = 16),
-    axis.title.y = element_text(size = 16)
-  )
-
-top_1_pdp_HH <- pdp::partial(results_HH, pred.var = imp_df_HH[1, 1], prob = TRUE,
-                              train = pa_data.train, progress = "text", which.class = 2)
-top_2_pdp_HH <- pdp::partial(results_HH, pred.var = imp_df_HH[2, 1], prob = TRUE,
-                              train = pa_data.train, progress = "text", which.class = 2)
-top_3_pdp_HH <- pdp::partial(results_HH, pred.var = imp_df_HH[3, 1], prob = TRUE,
-                              train = pa_data.train, progress = "text", which.class = 2)
-top_4_pdp_HH <- pdp::partial(results_HH, pred.var = imp_df_HH[4, 1], prob = TRUE,
-                              train = pa_data.train, progress = "text", which.class = 2)
-top_5_pdp_HH <- pdp::partial(results_HH, pred.var = imp_df_HH[5, 1], prob = TRUE,
-                              train = pa_data.train, progress = "text", which.class = 2)
-top_6_pdp_HH <- pdp::partial(results_HH, pred.var = imp_df_HH[6, 1], prob = TRUE,
-                              train = pa_data.train, progress = "text", which.class = 2)
-top_7_pdp_HH <- pdp::partial(results_HH, pred.var = imp_df_HH[7, 1], prob = TRUE,
-                              train = pa_data.train, progress = "text", which.class = 2)
+  theme(axis.text = element_text(size = 14), axis.title = element_text(size = 16))
 
 
-ggplot(top_1_pdp_HH, aes(x = dist_to_shoreline_m, y = yhat)) +
-  geom_smooth(col = "purple", method = "gam") +
-  theme_bw() + xlab("distance to shoreline (m)") + ylab(bquote("Marginal effect" ~ (hat(y))))+
-    theme(
-    axis.text.x  = element_text(size = 14),
-    axis.text.y  = element_text(size = 14),
-    axis.title.x = element_text(size = 16),
-    axis.title.y = element_text(size = 16)
-  )
+brier_test <- performance(pred_HH, measures = mlr::brier)   # MSE
+rmse_test  <- sqrt(brier_test)                              # RMSE
+c(MSE = unname(brier_test), RMSE = unname(rmse_test))
 
-ggplot(top_2_pdp_HH, aes(x = factor(season, levels = c("Spring", "Summer", "Winter", "Fall")), y = yhat)) +
-  geom_col(fill = "purple", col = "purple4") +
-  theme_bw() + xlab("Season") + ylab(bquote("Marginal effect" ~ (hat(y)))) +
-  theme(
-    axis.text.x  = element_text(size = 14),
-    axis.text.y  = element_text(size = 14),
-    axis.title.x = element_text(size = 16),
-    axis.title.y = element_text(size = 16)
-  )
+##########
+#INDIVIDUAL PDP PLOTS
+#with updated predictor importance MSE brier plotting code (above)
+top_vars <- imp_mse$feature[order(-imp_mse$mean_inc)]
+top_vars   # season, zone, fetch, depth_m, SAV, shoreline_distance_m
 
 
-#NAS in the zone so need to go back to where this was assigned to PA dataframe to check whats missing
-
-zone_levels <- c("Cootes Paradise", "Grindstone", "Carrolls Bay", "Bayfront area",
-                 "West End", "North shore", "Central", "East End")
-
-top_3_pdp_HH$zone <- as.character(top_3_pdp_HH$zone)
-top_3_pdp_HH$zone[is.na(top_3_pdp_HH$zone)] <- "North shore"
-top_3_pdp_HH$zone <- factor(top_3_pdp_HH$zone, levels = zone_levels)
-
-ggplot(top_3_pdp_HH, aes(x = zone, y = yhat)) +
-  geom_col(fill = "purple", col = "purple4") +
-  theme_bw() + xlab("Zone") + ylab(bquote("Marginal effect" ~ (hat(y)))) +
-  theme(
-    axis.text.x  = element_text(size = 14, angle = 35, hjust = 1),
-    axis.text.y  = element_text(size = 14),
-    axis.title.x = element_text(size = 16),
-    axis.title.y = element_text(size = 16)
-  )
-
-ggplot(top_4_pdp_HH, aes(x = fetch, y = yhat)) +
-  geom_smooth(col = "purple", method = "gam") +
-  theme_bw() + xlab("Fetch") + ylab(bquote("Marginal effect" ~ (hat(y))))+
-      theme(
-    axis.text.x  = element_text(size = 14),
-    axis.text.y  = element_text(size = 14),
-    axis.title.x = element_text(size = 16),
-    axis.title.y = element_text(size = 16)
-  )
+pdp_list <- lapply(setNames(top_vars, top_vars), function(v)
+  pdp::partial(results_HH, pred.var = v, prob = TRUE, which.class = 2,
+               train = pa_data.train[, names(pa_data.train) != "presence"],
+               progress = "none"))
 
 
-ggplot(top_5_pdp_HH, aes(x = depth_m, y = yhat)) +
-  geom_smooth(col = "purple", method = "gam") +
-  theme_bw() + xlab("depth (m)") + ylab(bquote("Marginal effect" ~ (hat(y))))+
-        theme(
-    axis.text.x  = element_text(size = 14),
-    axis.text.y  = element_text(size = 14),
-    axis.title.x = element_text(size = 16),
-    axis.title.y = element_text(size = 16)
-  )
+# 1. One shared y-range across every predictor's PDP
+y_rng <- range(unlist(purrr::map(pdp_list, ~ range(.x$yhat, na.rm = TRUE))))
+y_rng <- c(floor(y_rng[1] * 20) / 20, ceiling(y_rng[2] * 20) / 20)   # round out to nearest 0.05
+y_rng
+
+labs_map <- c(season = "Season", zone = "Zone", fetch = "Fetch", depth_m = "Depth (m)",
+              SAV = "SAV %", shoreline_distance_m = "Distance to shoreline (m)")
+
+
+plot_one <- function(df, v, ylim = y_rng) {
+  base <- theme_bw() + theme(text = element_text(size = 16))
+  ylab <- bquote("Marginal effect" ~ (hat(y)))
+  xl   <- if (v %in% names(labs_map)) labs_map[[v]] else v
+
+  if (is.numeric(df[[v]])) {
+    ggplot(df, aes(.data[[v]], yhat)) +
+      geom_smooth(colour = "purple", linewidth = 1.1) +
+      coord_cartesian(ylim = ylim) +
+      labs(x = xl, y = ylab) + base
+  } else {
+    ggplot(df, aes(.data[[v]], yhat)) +
+      geom_col(fill = "purple", colour = "purple4") +
+      coord_cartesian(ylim = c(0, ylim[2])) +       # bars must start at 0 to be read honestly
+      labs(x = xl, y = ylab) + base +
+      theme(axis.text.x = element_text(angle = 35, hjust = 1))
+  }
+}
+
+plots <- purrr::imap(pdp_list, ~ plot_one(.x, .y))
+patchwork::wrap_plots(plots, ncol = 2)
+
+
+# 2-way interactions with the strongest-interacting feature
+conflicted::conflict_prefer("map", "purrr")
+conflicted::conflict_prefer("imap", "purrr")
+conflicted::conflict_prefer("set_names", "purrr")
+
+
+plot_one <- function(df, v) {
+  base <- theme_bw() + theme(text = element_text(size = 16))
+  ylab <- bquote("Marginal effect" ~ (hat(y)))
+  xl   <- if (v %in% names(labs_map)) labs_map[[v]] else v
+
+  if (is.numeric(df[[v]])) {
+    ggplot(df, aes(.data[[v]], yhat)) +
+      geom_smooth(colour = "purple", linewidth = 1.1) +
+      labs(x = xl, y = ylab) + base
+  } else {
+    ggplot(df, aes(.data[[v]], yhat)) +
+      geom_col(fill = "purple", colour = "purple4") +
+      labs(x = xl, y = ylab) + base +
+      theme(axis.text.x = element_text(angle = 35, hjust = 1))
+  }
+}
+
+plots <- purrr::imap(pdp_list, ~ plot_one(.x, .y))
+patchwork::wrap_plots(plots, ncol = 2)
 
 
 
-ggplot(top_6_pdp_HH, aes(x = SAV, y = yhat)) +
-  geom_smooth(col = "purple", method = "gam") +
-  theme_bw() + xlab("SAV %") + ylab(bquote("Marginal effect" ~ (hat(y))))+
-          theme(
-    axis.text.x  = element_text(size = 14),
-    axis.text.y  = element_text(size = 14),
-    axis.title.x = element_text(size = 16),
-    axis.title.y = element_text(size = 16)
-  )
 
-###################################
-## ---- Interaction strengths (sub-sampled) ----
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+####H statistic interation step 
 set.seed(1234)
 pa_data.train_sub_f <- pa_data.train[sample(nrow(pa_data.train),
                                             round(nrow(pa_data.train) * 0.25)), ]
@@ -259,115 +364,125 @@ X_HH_sub <- dplyr::select(pa_data.train_sub_f, -presence)
 predictor_HH_sub <- Predictor$new(model_rf.Bin_HH, data = X_HH_sub,
                                   y = pa_data.train_sub_f$presence)
 
-# keep the Interaction object separate from its plot
+vars <- names(X_HH_sub)
+pairs <- combn(vars, 2, simplify = FALSE)
+
+# 1. Overall H per feature (how much each variable interacts with anything)
 interact_all <- Interaction$new(predictor_HH_sub)
-plot(interact_all) + ggtitle("Interaction strengths")
+plot(interact_all)
 
-interact_results_HH <- interact_all$results %>%
+# 2. Pairwise H for the top one or two features only
+interact_top <- Interaction$new(predictor_HH_sub, feature = "season")
+interact_top$results %>% dplyr::arrange(dplyr::desc(.interaction))
+###interactions 
+#plus a plot
+
+labs_map <- c(zone = "Zone", season = "Season",
+              depth_m = "Depth (m)", fetch = "Fetch", SAV = "SAV %",
+              shoreline_distance_m = "Distance to shoreline")
+lab <- function(v) ifelse(v %in% names(labs_map), labs_map[v], v)
+
+# If interact_top is the iml Interaction object, use $results.
+# If it's already a data frame, replace interact_top$results with interact_top.
+top4 <- interact_top$results %>%
   group_by(.feature) %>%
-  summarise(H = mean(.interaction)) %>%
-  rename(feature = .feature) %>%
+  summarise(H = mean(.interaction), .groups = "drop") %>%
   arrange(desc(H)) %>%
-  as.data.frame()
+  slice_head(n = 4) %>%
+  separate(.feature, into = c("a", "b"), sep = ":") %>%
+  mutate(pair = paste(lab(a), "×", lab(b)))
+top4
 
-# 2-way interactions with the strongest-interacting feature
-interact_top_1_HH <- Interaction$new(predictor_HH_sub,
-                                     feature = interact_results_HH$feature[1])
+ggplot(top4, aes(H, reorder(pair, H))) +
+  geom_col(fill = "purple", colour = "purple4", width = 0.7) +
+  labs(x = "Interaction strength (H statistic)", y = NULL) +
+  theme_bw() +
+  theme(axis.text = element_text(size = 14), axis.title = element_text(size = 16))
 
-interact_top_1_HH_df <- interact_top_1_HH$results %>%
+# ---- 1. Interactions with SEASON (the variable used for colour) ----
+interact_season <- Interaction$new(predictor_HH_sub, feature = "season")
+
+interact_season_df <- interact_season$results %>%
   group_by(.feature) %>%
-  summarise(H = mean(.interaction)) %>%
-  rename(feature = .feature) %>%
+  summarise(H = mean(.interaction), .groups = "drop") %>%
   arrange(desc(H)) %>%
-  separate(feature, into = c("top1", "top2"), sep = ":") %>%
+  separate(.feature, into = c("a", "b"), sep = ":") %>%
+  mutate(partner = ifelse(a == "season", b, a)) %>%
   as.data.frame()
+interact_season_df
 
-interact_top_1_HH_df   # check this: top row is your strongest pair
-
-library(purrr)
-library(patchwork)   # install.packages("patchwork") if needed
-
+# ---- 2. Settings ----
 season_lv   <- c("Spring", "Summer", "Fall", "Winter")
 season_cols <- c(Spring = "#ffb3ba", Summer = "#a8e6cf",
                  Fall   = "#f9c8a0", Winter = "#85c1e9")
 
-# the six predictors paired with season, in order of interaction strength
-vars <- interact_top_1_HH_df$top1
+xlabs <- c(fetch = "Fetch", zone = "Zone", month = "Month", depth_m = "Depth (m)",
+           shoreline_distance_m = "Distance to shoreline (m)", SAV = "SAV %")
+lab <- function(v) if (v %in% names(xlabs)) xlabs[[v]] else v
 
-# nicer axis labels
-xlabs <- c(fetch = "Fetch", zone = "Zone", depth_m = "Depth (m)",
-           dist_to_shoreline_m = "Distance to shoreline (m)",
-           thermal = "Thermal period", SAV = "SAV %")
+# Partners of season, strongest interaction first, restricted to variables in the model
+X_cols <- names(X_HH_sub)
+vars <- interact_season_df$partner
+vars <- vars[vars %in% X_cols & vars != "season"]
+vars
 
-# compute all six 2-way PDPs
-vars <- interact_top_1_HH_df$top1   # must exist before the loop
-
-pdp_list <- purrr::map(purrr::set_names(vars), function(v) {
+# ---- 3. Two-way PDPs: each partner x season ----
+pdp_list <- map(set_names(vars), function(v) {
   pdp::partial(results_HH,
                pred.var        = c(v, "season"),
                prob            = TRUE,
                which.class     = 2,
-               train           = pa_data.train,
+               train           = X_HH_sub,       # predictors only, same columns as the model
                grid.resolution = 30,
                progress        = "none")
 })
 
+# ---- 4. One shared y-range, so every panel is comparable ----
+y_rng <- range(unlist(map(pdp_list, ~ range(.x$yhat, na.rm = TRUE))))
+y_rng <- c(floor(y_rng[1] * 20) / 20, ceiling(y_rng[2] * 20) / 20)
 
-conflicted::conflict_prefer("map", "purrr")
-conflicted::conflict_prefer("imap", "purrr")
-conflicted::conflict_prefer("set_names", "purrr")
-y_rng <- range(unlist(purrr::map(pdp_list, ~ range(.x$yhat))))
-
-# shared y-range so panels are comparable (drop this to let each panel scale freely)
-plots <- purrr::imap(pdp_list, ~ plot_pdp(.x, .y))
-
+# ---- 5. Plot function (defined BEFORE it is used) ----
 plot_pdp <- function(df, v) {
   df$season <- factor(df$season, levels = season_lv)
 
   base <- theme_bw() +
-    theme(axis.text  = element_text(size = 12),
-          axis.title = element_text(size = 14),
+    theme(axis.text    = element_text(size = 12),
+          axis.title   = element_text(size = 14),
           legend.text  = element_text(size = 12),
           legend.title = element_text(size = 14))
 
   if (is.numeric(df[[v]])) {
-    # continuous predictor: one line per season
-    ggplot(df, aes(x = .data[[v]], y = yhat, colour = season, group = season)) +
-      geom_smooth(method="gam", alpha=0.2, linewidth=1.1) +
-      scale_colour_manual(values = season_cols) +
-      scale_fill_manual(values=season_cols)+
-      labs(x = xlabs[[v]], y = bquote("Marginal effect" ~ (hat(y))),
-           colour = "Season") +
-      coord_cartesian(ylim = y_rng) +
-      base
+    ggplot(df, aes(.data[[v]], yhat, colour = season, group = season)) +
+      geom_smooth(linewidth = 1.1) +
+      scale_colour_manual(values = season_cols, name = "Season", drop = FALSE) +
+      labs(x = lab(v), y = bquote("Marginal effect" ~ (hat(y)))) +base
   } else {
-    # categorical predictor: grouped bars, season as fill
-    ggplot(df, aes(x = .data[[v]], y = yhat, fill = season)) +
+    ggplot(df, aes(.data[[v]], yhat, fill = season)) +
       geom_col(position = position_dodge(width = 0.8), width = 0.75) +
-      scale_fill_manual(values = season_cols) +
-      labs(x = xlabs[[v]], y = bquote("Marginal effect" ~ (hat(y))),
-           fill = "Season") +
-      coord_cartesian(ylim = c(0, y_rng[2])) +
-      base +
+      scale_fill_manual(values = season_cols, name = "Season", drop = FALSE) +
+      labs(x = lab(v), y = bquote("Marginal effect" ~ (hat(y)))) +
+       base +
       theme(axis.text.x = element_text(angle = 35, hjust = 1))
   }
 }
 
 plots <- imap(pdp_list, ~ plot_pdp(.x, .y))
 
-# combined figure with one shared legend
-wrap_plots(plots, ncol = 2, guides = "collect") &
+# ---- 6. Combine with one shared legend and save ----
+fig <- wrap_plots(plots, ncol = 2, guides = "collect") &
   theme(legend.position = "bottom")
+fig
 
-ggsave("pdp_season_interactions.png", width = 11, height = 12, dpi = 300)
+ggsave("pdp_season_interactions.png", plot = fig, width = 11, height = 12, dpi = 300)
+
+
 
 #top 3 two-way interaction plots as grids 
 #could you add season as a colour?
-
-
-#next will be building the predictive raster layer 
-#first need to figure out whats going on with zone OR drop it 
-#starting at page 17 of Griffin et al. appendix data sheet 1
+#grids for depth and zone
+#SAV season allows us to narrow in on smaller bins for SAV
+#dsitance to land and season 
+#distance to land and depth (should make sense just like depth and SAV)
 
 library(patchwork)
 
@@ -376,8 +491,8 @@ zone_levels <- c("Cootes Paradise", "Grindstone", "Carrolls Bay", "Bayfront area
                  "West End", "North shore", "Central", "East End")
 
 xlabs <- c(fetch = "Fetch", zone = "Zone", depth_m = "Depth (m)",
-           dist_to_shoreline_m = "Distance to shoreline (m)",
-           thermal = "Thermal period", SAV = "SAV %")
+           shoreline_distance_m = "Distance to shoreline (m)"
+           , SAV = "SAV %")
 
 # bin the predictor (continuous only) and average yhat per bin x season
 make_grid_df <- function(df, v, n_bins = 8) {
@@ -423,12 +538,78 @@ wrap_plots(grid_plots, ncol = 2, guides = "collect") &
 
 ggsave("pdp_season_grids.png", width = 11, height = 12, dpi = 300)
 
+#depth and zone
+# 1. Two-way PDP: zone x depth
+pdp_zd <- pdp::partial(results_HH,
+                       pred.var        = c("zone", "depth_m"),
+                       prob            = TRUE,
+                       which.class     = 2,
+                       train           = X_HH_sub,
+                       grid.resolution = 30,
+                       progress        = "none")
+
+pdp_zd$zone <- factor(trimws(as.character(pdp_zd$zone)), levels = zone_levels)
+
+# 2. Bin depth and average yhat within each zone x depth bin
+n_bins <- 8
+brks <- seq(min(pdp_zd$depth_m), max(pdp_zd$depth_m), length.out = n_bins + 1)
+pdp_zd$depth_bin <- cut(pdp_zd$depth_m, breaks = brks, include.lowest = TRUE, dig.lab = 3)
+
+grid_zd <- pdp_zd %>%
+  data.frame() %>%
+  group_by(zone, depth_bin) %>%
+  summarise(mean = mean(yhat), .groups = "drop")
+
+# 3. Plot
+ggplot(grid_zd, aes(zone, depth_bin, fill = mean)) +
+  geom_tile(colour = "white") +
+  scale_fill_gradient(low = "white", high = "steelblue",
+                      name = expression("Marginal effect" ~ (hat(y)))) +
+  labs(x = "Zone", y = "Depth (m)") +
+  theme_bw() +
+  theme(axis.text.x  = element_text(angle = 35, hjust = 1, size = 14),
+        axis.text.y  = element_text(size = 14),
+        axis.title   = element_text(size = 16),
+        legend.text  = element_text(size = 12),
+        legend.title = element_text(size = 14))
+
+#SAV and zone 
+
+pdp_zd <- pdp::partial(results_HH,
+                       pred.var        = c("zone", "SAV"),
+                       prob            = TRUE,
+                       which.class     = 2,
+                       train           = X_HH_sub,
+                       grid.resolution = 30,
+                       progress        = "none")
+
+pdp_zd$zone <- factor(trimws(as.character(pdp_zd$zone)), levels = zone_levels)
+
+# 2. Bin depth and average yhat within each zone x depth bin
+n_bins <- 8
+brks <- seq(min(pdp_zd$SAV), max(pdp_zd$SAV), length.out = n_bins + 1)
+pdp_zd$sav_bin <- cut(pdp_zd$SAV, breaks = brks, include.lowest = TRUE, dig.lab = 3)
+
+grid_zd <- pdp_zd %>%
+  data.frame() %>%
+  group_by(zone, sav_bin) %>%
+  summarise(mean = mean(yhat), .groups = "drop")
+
+# 3. Plot
+ggplot(grid_zd, aes(zone, sav_bin, fill = mean)) +
+  geom_tile(colour = "white") +
+  scale_fill_gradient(low = "white", high = "steelblue",
+                      name = expression("Marginal effect" ~ (hat(y)))) +
+  labs(x = "Zone", y = "SAV (%)") +
+  theme_bw() +
+  theme(axis.text.x  = element_text(angle = 35, hjust = 1, size = 14),
+        axis.text.y  = element_text(size = 14),
+        axis.title   = element_text(size = 16),
+        legend.text  = element_text(size = 12),
+        legend.title = element_text(size = 14))
+
 
 ##############
-
-
-
-
 library(patchwork)
 
 season_lv <- c("Spring", "Summer", "Fall", "Winter")
@@ -500,16 +681,14 @@ ggsave("pdp_grid_dist_shoreline.png", p_dist,  width = 6, height = 6, dpi = 300)
 ggsave("pdp_grid_depth.png",          p_depth, width = 6, height = 6, dpi = 300)
 ggsave("pdp_grid_SAV.png",            p_sav,   width = 6, height = 6, dpi = 300)
 
-#temporal blocking ?? i.e. spring/summer/winter/fall or thermocline isoline?
-
-
-
 ##############################
 ## ---- 1. AUC: test set vs spatial CV ----
 auc_test <- mlr::performance(pred_HH, measures = mlr::auc)
 auc_test
 
-tune_HH$y          # spatial CV AUC for the best hyperparameters (auc.test.mean)
+tune_HH$y          
+
+# spatial CV AUC for the best hyperparameters (auc.test.mean)
 
 # If the test AUC is clearly higher than the spatial CV AUC, the random
 # test split is probably flattering the model (spatial autocorrelation).
@@ -557,3 +736,130 @@ ggplot(cv_thr, aes(x = threshold, y = TSS)) +
 ## ---- 4. Confusion matrix on the test set at that threshold ----
 pred_HH_thr <- mlr::setThreshold(pred_HH, best_thr)
 (performance_HH_thr <- mlr::calculateROCMeasures(pred_HH_thr))
+
+
+
+#########################################################
+##
+## prediction probability mapping from RF modelling
+##
+###############################################################
+#build the grid dataframe up 
+#50m grid dataframe - see builing PA dataframe code
+#see adding predictors to DF (PA dataframe)
+grid <- read.csv("01_data/02_processed_files/for SAVM/HH_50mGrid_latlon.csv")
+
+#########
+#Ranger built in function attempt
+
+pred_rf<-predict(model_rf.Bin_HH, task.test, type="response")
+pred_rf <- pred_rf$predictions [, 2]
+
+library(viridis)
+
+needed <- results_HH$forest$independent.variable.names
+needed
+
+# Grid x seasons (no years)
+# 1. Load your 50 m prediction grid (use your own file path)
+grid <- read.csv("01_data/02_processed_files/for SAVM/HH_50mGrid_latlon.csv")
+
+# 2. Confirm it's a data frame, not a function
+class(grid)      # should be "data.frame"
+names(grid)      # shows the column names you have
+head(grid)
+
+seasons <- data.frame(season = levels(factor(pa_data.train$season)))
+gridseason <- merge(seasons, grid)
+gridseason$season <- factor(gridseason$season, levels = levels(factor(pa_data.train$season)))
+# if zone is in the model:
+# gridseason$zone <- factor(gridseason$zone, levels = levels(pa_data.train$zone))
+
+gridseason <- gridseason[complete.cases(gridseason[, needed]), ]
+
+gridseason$pred <- predict(results_HH, data = gridseason[, needed])$predictions[, "pres"]
+
+# Shoreline layer must be in EPSG:32617 to match UTM.X / UTM.Y
+shore <- st_transform(shorelinemap, 32617)
+
+ggplot() +
+  geom_tile(data = gridseason, aes(longitude,latitude , fill = pred)) +
+  geom_sf(data = shore, fill = NA, colour = "darkgrey", inherit.aes = FALSE) +
+  scale_fill_viridis_c(name = "Presence probability", limits = c(0, 1)) +
+  facet_wrap(~ season) +
+  coord_sf(crs = 32617, datum = 32617) +
+  labs(x = "Easting", y = "Northing") +
+  theme_bw() + theme(text = element_text(size = 18))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###second example pick one to keep delete other 
+
+library(dplyr); library(tidyr); library(sf); library(terra)
+library(ggplot2); library(viridis)
+
+needed <- results_HH$forest$independent.variable.names
+needed    # every one of these must be a column in the surface, with matching names and levels
+
+# 1. Grid points (rename columns to match your model; edit the right-hand names to your grid)
+surf <- grid %>%
+  transmute(ID, x = longitude    , y = latitude ,
+            depth_m = Depth, SAV = SAV, fetch = Fetch)
+
+# 2. Corrected distance to shoreline, computed the same way as for the detections
+pts <- st_as_sf(surf, coords = c("x", "y"), crs = 32617, remove = FALSE)
+shore_line <- st_boundary(st_transform(shorelinemap, 32617))
+surf$dist_to_shoreline_m <- as.numeric(apply(st_distance(pts, shore_line), 1, min))
+
+# 3. Zone, only if it is still in the model (zones_sf = your zone polygons with a 'zone' column)
+# surf$zone <- st_join(pts, st_transform(zones_sf, 32617))$zone
+# surf$zone <- factor(trimws(as.character(surf$zone)), levels = levels(pa_data.train$zone))
+
+# 4. One row per cell per season
+season_lv <- levels(factor(pa_data.train$season))
+surf <- surf %>%
+  tidyr::crossing(season = season_lv) %>%
+  mutate(season = factor(season, levels = season_lv))
+
+# 5. Predict (ranger errors on NAs, so drop incomplete rows first)
+surf <- surf[complete.cases(surf[, needed]), ]
+surf$pred <- predict(results_HH, data = surf[, needed])$predictions[, "pres"]
+
+# 6. Optional mask: cells whose covariates fall outside the sampled range
+covs <- c("depth_m", "SAV", "fetch", "dist_to_shoreline_m")
+in_range <- Reduce(`&`, lapply(covs, function(v)
+  surf[[v]] >= min(pa_data.train[[v]]) & surf[[v]] <= max(pa_data.train[[v]])))
+surf$pred_masked <- ifelse(in_range, surf$pred, NA)
+mean(in_range)   # share of cells inside the sampled range
+
+# 7. Map, faceted by season
+shore <- st_transform(shorelinemap, 32617)
+
+ggplot() +
+  geom_raster(data = surf, aes(x, y, fill = pred_masked)) +
+  geom_sf(data = shore, fill = NA, colour = "darkgrey", inherit.aes = FALSE) +
+  scale_fill_viridis_c(name = "Relative habitat\nsuitability", limits = c(0, 1),
+                       na.value = "grey85") +
+  facet_wrap(~ season) +
+  coord_sf(crs = 32617, datum = 32617) +
+  labs(x = "Easting", y = "Northing") +
+  theme_bw() + theme(text = element_text(size = 16))
+
+# 8. GeoTIFFs for GIS (one layer per season)
+r <- terra::rast(lapply(season_lv, function(s)
+  terra::rast(surf[surf$season == s, c("x", "y", "pred_masked")],
+              type = "xyz", crs = "EPSG:32617")))
+names(r) <- season_lv
+terra::writeRaster(r, "HH_suitability_by_season.tif", overwrite = TRUE)
