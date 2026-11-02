@@ -755,14 +755,8 @@ grid <- read.csv("01_data/02_processed_files/for SAVM/HH_50mGrid_latlon.csv")
 pred_rf<-predict(model_rf.Bin_HH, task.test, type="response")
 pred_rf <- pred_rf$predictions [, 2]
 
-library(viridis)
-
 needed <- results_HH$forest$independent.variable.names
 needed
-
-# Grid x seasons (no years)
-# 1. Load your 50 m prediction grid (use your own file path)
-grid <- read.csv("01_data/02_processed_files/for SAVM/HH_50mGrid_latlon.csv")
 
 # 2. Confirm it's a data frame, not a function
 class(grid)      # should be "data.frame"

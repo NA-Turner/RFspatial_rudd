@@ -525,22 +525,23 @@ ggplot() + HH_plot+
   )
 ##add zone variable 
 
-#add 'zones' which will be the same rec groupings we did for goldfish see Turner et al. 2026
+#zones were added to a 50m grid in arcgis
+#see supp figureXX.
+#zones were based off of receiver zone assigned in Turner et al. 2026
+#zones generally followed receiver location 
+#and when possible did not cut off buffer zone areas i.e. along the north and east end areas
+#some buffers overlap zones in the west end/carrolls bay/cootes paradise area (two fishway receivers)
 
-det_randomized$zone <- case_when(
-  det_randomized$station %in% c("HAM-053", "HAM-051","HAM-036","HAM-082", "HAM-081") ~ "Bayfront area",
-  det_randomized$station %in% c("HAM-030", "HAM-042", "HAM-044", "HAM-096", "HAM-098", "HAM-095", "HAM-094", "HAM-093", 
-  "HAM-088", "HAM-090","HAM-091", "HAM-089", "HAM-030", "HAM-042") ~ "Cootes Paradise",
-  det_randomized$station %in% c( "HAM-033", "HAM-059", "HAM-060", "HAM-061", "HAM-062","HAM-066", "HAM-067", "HAM-068", "HAM-087") ~ "Grindstone",
-  det_randomized$station %in% c("HAM-048", "HAM-018", "HAM-028", "HAM-037", "HAM-072", "HAM-073", "HAM-074", "HAM-075", "HAM-076", "HAM-079", "HAM-078", 
-                               "HAM-077", "HAM-085", "HAM-084", "HAM-083", "HAM-005", "HAM-011", "HAM-027", "HAM-023", "HAM-080") ~ "West End",
-  det_randomized$station %in% c("HAM-035") ~ "East End",
-  det_randomized$station %in% c("HAM-013", "HAM-003", "HAM-002", "HAM-012", "HAM-045", "HAM-025", "HAM-058", "HAM-009", "HAM-008", "HAM-034", "HAM-035") ~ "East End",
-  det_randomized$station %in% c("HAM-046", "HAM-047", "HAM-007", "HAM-015", "HAM-001") ~ "North shore",
-  det_randomized$station %in% c("HAM-021", "HAM-004", "HAM-017", "HAM-039", "HAM-041") ~ "Central",
-  det_randomized$station %in% c("HAM-070", "HAM-099" ,"HAM-071", "HAM-063", "HAM-032", "HAM-043", "HAM-029") ~ "Carrolls Bay",
-  TRUE ~ NA_character_ # Default to NA if no match
-)
+#assign each PA randmoized location a unique zone value based on random location 
+
+
+
+
+
+
+
+
+
 
 
 #dataframe now has:
@@ -598,297 +599,126 @@ high_cor
 
 grid <- read.csv("01_data/02_processed_files/for SAVM/HH_50mGrid_latlon.csv")
 
-##depth
-
-
-unique_locs <- det_randomized |>
-  distinct(transmitter_id, date, station, year, rand_long, rand_lat)
-
-# ── 3. Convert to sf points — 
-locs_sf <- st_as_sf(unique_locs,
-                    coords = c("rand_long", "rand_lat"),
-                    crs    = 4326)
-
-# ── 4. Reproject points to match the raster CRS ──────────────────────────────
-# terra and sf need matching CRS for extraction to work correctly
-raster_crs <- crs(depth_raster)
-locs_projected <- st_transform(locs_sf, crs = raster_crs)
-
-# Convert to SpatVector for terra::extract()
-locs_vect <- vect(locs_projected)
-# ── 5. Extract depth values ───────────────────────────────────────────────────
-depth_vals <- terra::extract(depth_raster, locs_vect)
-# Returns a dataframe with columns: ID (row index) + raster layer name(s)
-
-# ── 6. Join by ID (row index) — safe regardless of ordering ──────────────────
-# terra's ID column corresponds to the row number of locs_vect
-unique_locs_depth <- unique_locs |>
-  mutate(ID = row_number()) |>                        # create matching ID
-  left_join(depth_vals, by = "ID") |>                 # join on position
-  rename(depth_m = names(depth_raster)[1]) |>         # rename by layer name
-  select(-ID)
-
-
-# ── Split into complete and NA sets ──────────────────────────────────────────
-locs_complete <- unique_locs_depth |> filter(!is.na(depth_m))
-locs_na       <- unique_locs_depth |> filter(is.na(depth_m))
-
-# ── Convert both to sf objects ────────────────────────────────────────────────
-complete_sf <- st_as_sf(locs_complete,
-                        coords = c("rand_long", "rand_lat"),
-                        crs = 4326)
-
-na_sf <- st_as_sf(locs_na,
-                  coords = c("rand_long", "rand_lat"),
-                  crs = 4326)
-
-# ── For each NA point, find the nearest non-NA point ─────────────────────────
-nearest_idx <- st_nearest_feature(na_sf, complete_sf)
-
-# ── Borrow depth from the nearest complete point ──────────────────────────────
-locs_na <- locs_na |>
-  mutate(depth_m = locs_complete$depth_m[nearest_idx])
-
-# ── Recombine ─────────────────────────────────────────────────────────────────
-unique_locs_depth <- bind_rows(locs_complete, locs_na)
-
-# ── Join back to pa_data ──────────────────────────────────────────────────────
-det_randomized <- det_randomized |>
-  left_join(unique_locs_depth,
-            by = c("transmitter_id", "date","year", "station", "rand_lat", "rand_long"))
-
-#save for now can delete later once we add in more variables 
-#saveRDS(det_randomized, "c:/Users/TURNERN/Documents/For Github/RFspatial_rudd/01_data/02_processed_files/PA_rand_w_depth.rds")
-
-library(ggplot2)
-
-#plotting code to make sure depths look like they were generally correctly assigned 
-
-
-locs_depth_sf <- st_as_sf(
-  unique_locs_depth,
-  coords = c("rand_long", "rand_lat"),
-  crs = 4326
-)
-
-ggplot() +
-  geom_sf(data = HH_plot,
-          fill = "aliceblue",
-          color = "steelblue") +
-  geom_sf(data = locs_depth_sf,
-          aes(colour = depth_m),
-          size = 2) +
-    geom_sf(data = buffers_plot, aes (fill = thermal),alpha = 0.005 
-          , linewidth = 0.3, linetype = "dashed") +
-  scale_colour_viridis_c(
-    option = "mako",
-    direction = -1,
-    name = "Depth (m)"
-  ) +
-  coord_sf() +
-  theme_minimal()
-
-SAV2026rbgedits_raster <- rast("01_data/02_processed_files/raster layers/sav_rbgedits1")
-
-
-print(SAV2026rbgedits_raster)
-plot(SAV2026rbgedits_raster)  # sanity check visual
-
-#load the fetch raster layer 
-#fetch raster layer used in larocque et al. 
-#fetch_raster <- rast("01_data/04_shapefiles/Enviro layers/fetchweightedm_2024.tif")
-
-
-#two fetch layers 
-#1 thermocline 
-#2 isocline 
-#just use thermocline for now
-
-
-
-print(SAVnad83_raster)
-plot(SAVnad83_raster)  
-
-
-
-# ── 2. Get unique lat/lon locations ──────────────────────────────────────────
-# Assuming your data has columns: station, deploy_lat, deploy_long
-# (adjust column names to match your actual dataframe)
-#01_data\02_processed_files\PAdata_randomized.rds
-#going to add SAV to depth one
-PA_rand_w_depth <- readRDS("01_data/02_processed_files/PA_rand_w_depth.rds")
-unique_locs <- PA_rand_w_depth |>
-  distinct(transmitter_id, date, station, year, rand_long, rand_lat)
-
-# ── 3. Convert to sf points — use WGS84 (EPSG:4326) since coords are lat/lon ─
-locs_sf <- st_as_sf(unique_locs,
-                    coords = c("rand_long", "rand_lat"),
-                    crs    = 4326)
-
-# ── 4. Reproject points to match the raster CRS ──────────────────────────────
-# terra and sf need matching CRS for extraction to work correctly
-raster_crs <- crs(SAV2026rbgedits_raster)
-locs_projected <- st_transform(locs_sf, crs = raster_crs)
-
-# Convert to SpatVector for terra::extract()
-locs_vect <- vect(locs_projected)
-# ── 5. Extract depth values ───────────────────────────────────────────────────
-SAV_vals <- terra::extract(SAV2026rbgedits_raster, locs_vect)
-# Returns a dataframe with columns: ID (row index) + raster layer name(s)
-
-# ── 6. Join by ID (row index) — safe regardless of ordering ──────────────────
-# terra's ID column corresponds to the row number of locs_vect
-unique_locs_sav <- unique_locs |>
-  mutate(ID = row_number()) |>                        # create matching ID
-  left_join(SAV_vals, by = "ID") |>                 # join on position
-  rename(SAV = names(SAV2026rbgedits_raster)[1]) |>         # rename by layer name
-  select(-ID)
-
-
-# ── Split into complete and NA sets ──────────────────────────────────────────
-locs_complete <- unique_locs_sav |> filter(!is.na(SAV))
-locs_na       <- unique_locs_sav |> filter(is.na(SAV))
-
-# ── Convert both to sf objects ────────────────────────────────────────────────
-complete_sf <- st_as_sf(locs_complete,
-                        coords = c("rand_long", "rand_lat"),
-                        crs = 4326)
-
-na_sf <- st_as_sf(locs_na,
-                  coords = c("rand_long", "rand_lat"),
-                  crs = 4326)
-
-# ── For each NA point, find the nearest non-NA point ─────────────────────────
-nearest_idx <- st_nearest_feature(na_sf, complete_sf)
-
-# ── Borrow depth from the nearest complete point ──────────────────────────────
-locs_na <- locs_na |>
-  mutate(SAV = locs_complete$SAV[nearest_idx])
-
-# ── Recombine ─────────────────────────────────────────────────────────────────
-unique_locs_sav1 <- bind_rows(locs_complete, locs_na)
-
-# ── Join back to pa_data ──────────────────────────────────────────────────────
-det_randomized <- PA_rand_w_depth |>
-  left_join(unique_locs_sav1,
-            by = c("transmitter_id", "date","year", "station", "rand_lat", "rand_long"))
-
-#save for now can delete later once we add in more variables 
-#saveRDS(det_randomized, "c:/Users/TURNERN/Documents/For Github/RFspatial_rudd/01_data/02_processed_files/PA_rand_w_depthSAV.rds")
-
-locs_sav_sf <- st_as_sf(
-  unique_locs_sav1,
-  coords = c("rand_long", "rand_lat"),
-  crs = 4326
-)
-
-
-###add in fetch to the PA dataframe
-
-#PA_rand_w_depthSAV<-readRDS("01_data/02_processed_files/PA_rand_w_depthSAV.rds")
-PA_rand_w_depthSAV<-det_randomized
-
-unique_locs <- det_randomized |>
-  distinct(transmitter_id, date, station, year, rand_long, rand_lat)
-
-# ── 3. Convert to sf points — use WGS84 (EPSG:4326) since coords are lat/lon ─
-locs_sf <- st_as_sf(unique_locs,
-                    coords = c("rand_long", "rand_lat"),
-                    crs    = 4326)
-
-# ── 4. Reproject points to match the raster CRS ──────────────────────────────
-# terra and sf need matching CRS for extraction to work correctly
-fetch2026_raster <- rast("01_data/02_processed_files/enviro layers final - to be updated when avaliable/fetchnew.tif")
-plot(fetch2026_raster)
-raster_crs <- crs(fetch2026_raster)
-locs_projected <- st_transform(locs_sf, crs = raster_crs)
-
-# Convert to SpatVector for terra::extract()
-locs_vect <- vect(locs_projected)
-# ── 5. Extract depth values ───────────────────────────────────────────────────
-fetch_vals <- terra::extract(fetch2026_raster, locs_vect)
-# Returns a dataframe with columns: ID (row index) + raster layer name(s)
-
-# ── 6. Join by ID (row index) — safe regardless of ordering ──────────────────
-# terra's ID column corresponds to the row number of locs_vect
-unique_locs_fetch <- unique_locs |>
-  mutate(ID = row_number()) |>
-  left_join(fetch_vals, by = "ID") |>
-  rename(fetch = names(fetch2026_raster)[1]) |>
-  dplyr::select(-ID)
-
-# ── Split into complete and NA sets ──────────────────────────────────────────
-locs_complete <- unique_locs_fetch |> filter(!is.na(fetch))
-locs_na       <- unique_locs_fetch |> filter(is.na(fetch))
-
-# ── Convert both to sf objects ────────────────────────────────────────────────
-complete_sf <- st_as_sf(locs_complete,
-                        coords = c("rand_long", "rand_lat"),
-                        crs = 4326)
-
-na_sf <- st_as_sf(locs_na,
-                  coords = c("rand_long", "rand_lat"),
-                  crs = 4326)
-
-# ── For each NA point, find the nearest non-NA point ─────────────────────────
-nearest_idx <- st_nearest_feature(na_sf, complete_sf)
-
-# ── Borrow depth from the nearest complete point ──────────────────────────────
-locs_na <- locs_na |>
-  mutate(fetch = locs_complete$fetch[nearest_idx])
-
-# ── Recombine ─────────────────────────────────────────────────────────────────
-unique_locs_fetch1 <- bind_rows(locs_complete, locs_na)
-
-# ── Join back to pa_data ──────────────────────────────────────────────────────
-det_randomized <- PA_rand_w_depthSAV |>
-  left_join(unique_locs_fetch1,
-            by = c("transmitter_id", "date","year", "station", "rand_lat", "rand_long"))
-
-#save for now can delete later once we add in more variables 
-#saveRDS(det_randomized, "c:/Users/TURNERN/Documents/For Github/RFspatial_rudd/01_data/02_processed_files/PA_rand_w_depthSAVfetch.rds")
-
-head(PA_rand_w_depthSAVfetch)
-##adding in distance to shoreline
-PA_rand_w_depthSAVfetch$rand_lat
-#distance to shoreline code
-
-# ===============================
-# 1. Distance to Shoreline
-# ===============================
-######################
-library(sf)
-library(dplyr)
-
-# Convert your locations to an sf point object
-locations_sf <- st_as_sf(
-  PA_rand_w_depthSAVfetch,
-  coords = c("rand_long", "rand_lat"),
-  crs = 4326,  # WGS 84
-  remove = FALSE
-)
-
-# Transform both datasets to UTM Zone 17N (metres)
-locations_utm <- st_transform(locations_sf, 32617)
-shoreline_utm <- st_transform(shorelinemap, 32617)
-
-# Dissolve polygons to remove boundaries between adjacent polygons
-shoreline_union <- st_union(shoreline_utm)
-
-# Extract the boundary of the combined polygon geometry
-shoreline_boundary <- st_boundary(shoreline_union)
-
-# Calculate distance to the nearest polygon boundary
-PA_rand_w_depthSAVfetch$shoreline_distance_m <- as.numeric(
-  st_distance(locations_utm, shoreline_boundary)
-)
-
-#check to make sure the distance to shoreline worked
-ggplot() + HH_plot+
-  geom_sf(data = PA_rand_w_depthSAVfetch,
-          size = 1, alpha = 0.7, aes(color=shoreline_distance_m)) +
+#assign each point a unique id
+grid$cell_id <- seq_len(nrow(grid))
+
+locs_sf   <- st_as_sf(grid, coords = c("longitude", "latitude"), crs = 4326, remove = FALSE)
+locs_proj <- st_transform(locs_sf, crs(depthrast))
+
+# Extract depth. Rows come back in the same order as the points
+ext <- terra::extract(depthrast, vect(locs_proj))
+grid$depth_m <- ext[[2]]          # 2nd column is the raster values (1st is ID)
+
+# Fill NAs from the nearest cell that has a value
+has <- !is.na(grid$depth_m)
+if (any(!has)) {
+  nn   <- st_nearest_feature(locs_proj[!has, ], locs_proj[has, ])
+  dist <- as.numeric(st_distance(locs_proj[!has, ], locs_proj[has, ][nn, ], by_element = TRUE))
+  grid$depth_m[!has] <- grid$depth_m[has][nn]
+  summary(dist)                   # check how far the borrowed values came from
+}
+
+#####plot up 
+grid_sf <- st_as_sf(grid, coords = c("longitude", "latitude"),
+                    crs = 4326, remove = FALSE)
+HH_plot+
+  geom_sf(data = grid_sf, aes(color = depth_m), size = 1.8, alpha = 0.7) +
+  scale_color_viridis_c(option = "mako", direction = -1, name = "Depth (m)") +
   theme_minimal() +
-  labs(
-    x = "Longitude", y = "Latitude"
-  )
-##add zone variable 
+  labs(x = "Longitude", y = "Latitude")
+
+
+#SAV
+locs_sf   <- st_as_sf(grid, coords = c("longitude", "latitude"), crs = 4326, remove = FALSE)
+locs_proj <- st_transform(locs_sf, crs(SAV2026rbgedits_raster))
+
+# Extract sav Rows come back in the same order as the points
+ext <- terra::extract(SAV2026rbgedits_raster, vect(locs_proj))
+grid$sav <- ext[[2]]          # 2nd column is the raster values (1st is ID)
+
+# Fill NAs from the nearest cell that has a value
+has <- !is.na(grid$sav)
+if (any(!has)) {
+  nn   <- st_nearest_feature(locs_proj[!has, ], locs_proj[has, ])
+  dist <- as.numeric(st_distance(locs_proj[!has, ], locs_proj[has, ][nn, ], by_element = TRUE))
+  grid$sav[!has] <- grid$sav[has][nn]
+  summary(dist)                   # check how far the borrowed values came from
+}
+
+grid_sf <- st_as_sf(grid, coords = c("longitude", "latitude"),
+                    crs = 4326, remove = FALSE)
+HH_plot+
+  geom_sf(data = grid_sf, aes(color = sav), size = 1.8, alpha = 0.7) +
+  scale_color_viridis_c(option = "mako", direction = -1, name = "% SAV") +
+  theme_minimal() +
+  labs(x = "Longitude", y = "Latitude")
+
+
+
+####fetch
+locs_proj <- st_transform(locs_sf, crs(fetch2026_raster))
+
+# Extract sav Rows come back in the same order as the points
+ext <- terra::extract(fetch2026_raster, vect(locs_proj))
+grid$fetch <- ext[[2]]          # 2nd column is the raster values (1st is ID)
+
+# Fill NAs from the nearest cell that has a value
+has <- !is.na(grid$fetch)
+if (any(!has)) {
+  nn   <- st_nearest_feature(locs_proj[!has, ], locs_proj[has, ])
+  dist <- as.numeric(st_distance(locs_proj[!has, ], locs_proj[has, ][nn, ], by_element = TRUE))
+  grid$fetch[!has] <- grid$fetch[has][nn]
+  summary(dist)                   # check how far the borrowed values came from
+}
+
+#plot
+grid_sf <- st_as_sf(grid, coords = c("longitude", "latitude"),
+                    crs = 4326, remove = FALSE)
+HH_plot+
+  geom_sf(data = grid_sf, aes(color = fetch), size = 1.8, alpha = 0.7) +
+  scale_color_viridis_c(option = "mako", direction = -1, name = "fetch") +
+  theme_minimal() +
+  labs(x = "Longitude", y = "Latitude")
+
+#distance to shoreline 
+grid_sf <- st_as_sf(grid, coords = c("longitude", "latitude"), crs = 4326, remove = FALSE)
+
+# Project to a metric CRS so distances are in metres (UTM 17N)
+grid_utm <- st_transform(grid_sf, 32617)
+
+# One boundary feature, so there is a single column of distances
+shore_line <- shorelinemap |>
+  st_transform(32617) |>
+  st_union() |>
+  st_boundary()
+
+grid$shoreline_distance_m <- as.numeric(st_distance(grid_utm, shore_line)[, 1])
+
+summary(grid$shoreline_distance_m)   # should be in metres and in the same range as the training data
+summary(pa_data.train$shoreline_distance_m)
+
+grid_sf <- st_as_sf(grid, coords = c("longitude", "latitude"),
+                    crs = 4326, remove = FALSE)
+HH_plot+
+  geom_sf(data = grid_sf, aes(color = shoreline_distance_m), size = 1.8, alpha = 0.7) +
+  scale_color_viridis_c(option = "mako", direction = -1, name = "shoreline distance") +
+  theme_minimal() +
+  labs(x = "Longitude", y = "Latitude")
+
+
+
+#adding zone in arcgis 
+#write.csv(grid, "01_data/02_processed_files/grid50m_depthsavfetch.csv")
+library(readxl)
+gridnew<-read_excel("01_data/02_processed_files/grid50m_depthsavfetchzone.xls")
+
+#add df now with zone layer added to the grid 
+#added in arcgis 
+
+#adding season last, one season per row 
+
+season_lv <- levels(factor(pa_data.train$season))
+seasons   <- data.frame(season = factor(season_lv, levels = season_lv))
+
+gridseason <- merge(seasons, grid)   # cross join: nrow(grid) * number of seasons rows
+nrow(gridseason) == nrow(grid) * length(season_lv)
