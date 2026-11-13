@@ -49,20 +49,19 @@ plot(depthrast)
 fetch2026_raster <- rast("01_data/02_processed_files/raster layers/fetch/fetchnew.tif")
 plot(fetch2026_raster)
 
-#PA data frame with all variables added  (see adding predictors to DF.R code)
 
+#PA data frame with all variables added  (see adding predictors to DF.R code)
 PA_rand_w_depthSAVfetch<-readRDS("01_data/02_processed_files/PArand_complete.rds")
 # Row ID for indexing
 PA_rand_w_depthSAVfetch$rowID <- seq_len(nrow(PA_rand_w_depthSAVfetch))
 
 set.seed(1234)
-
-is.na(PA_rand_w_depthSAVfetch$zone)
-
+#check/set predictors as factors
 levels(base::as.factor(PA_rand_w_depthSAVfetch$presence))
 PA_rand_w_depthSAVfetch$thermal<-base::as.factor(PA_rand_w_depthSAVfetch$thermal)
 PA_rand_w_depthSAVfetch$season<-base::as.factor(PA_rand_w_depthSAVfetch$season)
 PA_rand_w_depthSAVfetch$presence<-base::as.factor(PA_rand_w_depthSAVfetch$presence)
+PA_rand_w_depthSAVfetch$zone<-base::as.factor(PA_rand_w_depthSAVfetch$zone)
 
 #################################
 
@@ -73,7 +72,6 @@ pa_data <- PA_rand_w_depthSAVfetch %>%
     presence = factor(presence, levels = c(0, 1), labels = c("abs", "pres")),
     rowID    = seq_len(n())
   )
-pa_data$zone<-base::as.factor(pa_data$zone)
 
 #split into train and test data
 #change % split right now at 60% train 
@@ -176,6 +174,60 @@ set.seed(1234)
 pred_HH <- predict(model_rf.Bin_HH, task = task.test)
 (performance_HH <- calculateROCMeasures(pred_HH))
 
+#####################################
+##checking model fit and for spatial auto correlation 
+obs   <- as.numeric(pa_data.train$presence == "pres")
+p_oob <- results_HH$predictions[, "pres"]
+
+resid_sf <- st_as_sf(
+  data.frame(resid = obs - p_oob,
+             x = coords.train$rand_long, y = coords.train$rand_lat),
+  coords = c("x", "y"), crs = 4326) |>
+  st_transform(32617)          # UTM 17N, so distances are in metres
+xy <- st_coordinates(resid_sf)
+
+# Duplicate coordinates can break the neighbour search
+sum(duplicated(xy))
+
+# a) Global Moran's I (permutation test)
+lw <- nb2listw(knn2nb(knearneigh(xy, k = 8)), style = "W")
+set.seed(1234)
+moran.mc(resid_sf$resid, lw, nsim = 999)
+
+# b) Correlogram: Moran's I by distance band (edit breaks to your extent)
+breaks <- c(0, 100, 250, 500, 1000, 2000, 3000)
+cor_df <- do.call(rbind, lapply(seq_along(breaks)[-1], function(i) {
+  lw_d <- nb2listw(dnearneigh(xy, breaks[i - 1], breaks[i]),
+                   style = "W", zero.policy = TRUE)
+  mt <- moran.test(resid_sf$resid, lw_d, zero.policy = TRUE)
+  data.frame(upper = breaks[i], I = unname(mt$estimate[1]), p = mt$p.value)
+}))
+cor_df
+ggplot(cor_df, aes(upper, I)) +
+  geom_hline(yintercept = 0, linetype = 2) + geom_line() +
+  geom_point(aes(colour = p < 0.05)) +
+  labs(x = "Distance (m)", y = "Moran's I of residuals")
+
+# c) Variogram
+vg <- variogram(resid ~ 1, resid_sf, cutoff = 3000, width = 100)
+vg_fit <- fit.variogram(vg, vgm(0.7 * max(vg$gamma), "Sph", 1000, min(vg$gamma)))
+plot(vg, vg_fit); vg_fit
+
+# d) Map the residuals
+#map of residuals for PA data
+#want to see an even spread of blue and red across the lake
+
+ggplot(cbind(resid_sf, xy), aes(X, Y, colour = resid)) +
+  geom_point(size = 0.8) +
+  scale_colour_gradient2(low = "blue", mid = "grey90", high = "red") +
+  coord_equal()
+
+
+# quantify by zone to determine if there is a zone-level bias
+d <- data.frame(zone = pa_data$zone[as.integer(rownames(pa_data.train))],
+                resid = obs - p_oob)
+aggregate(resid ~ zone, d, function(x) c(mean = mean(x), se = sd(x)/sqrt(length(x))))
+
 #####################################################################
 #this code creates a plot of the predictors and summarises on a scale of 1 to 0
 ##different way to plot predictors importance
@@ -253,7 +305,7 @@ labs_map <- c(zone = "Zone", season = "Season",
 imp_mse$label <- ifelse(imp_mse$feature %in% names(labs_map),
                         labs_map[imp_mse$feature], imp_mse$feature)
 
-ggplot(imp_mse, aes(mean_inc, reorder(label, mean_inc))) +
+predrank<-ggplot(imp_mse, aes(mean_inc, reorder(label, mean_inc))) +
   geom_vline(xintercept = 0, linetype = 2) +
   geom_col(fill = "purple", colour = "purple4", width = 0.7) +
   geom_errorbarh(aes(xmin = lo, xmax = hi), height = 0.25) +
@@ -261,6 +313,8 @@ ggplot(imp_mse, aes(mean_inc, reorder(label, mean_inc))) +
        y = NULL) +
   theme_bw() +
   theme(axis.text = element_text(size = 14), axis.title = element_text(size = 16))
+ggsave("03_outputs/01_figures/pred_rank.png", plot = predrank, width = 11, height = 12, dpi = 300)
+
 
 
 brier_test <- performance(pred_HH, measures = mlr::brier)   # MSE
@@ -340,22 +394,9 @@ patchwork::wrap_plots(plots, ncol = 2)
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ####H statistic interation step 
+#H statistic measures the top two way interaction strengths
+
 set.seed(1234)
 pa_data.train_sub_f <- pa_data.train[sample(nrow(pa_data.train),
                                             round(nrow(pa_data.train) * 0.25)), ]
@@ -442,7 +483,7 @@ y_rng <- range(unlist(map(pdp_list, ~ range(.x$yhat, na.rm = TRUE))))
 y_rng <- c(floor(y_rng[1] * 20) / 20, ceiling(y_rng[2] * 20) / 20)
 
 # ---- 5. Plot function (defined BEFORE it is used) ----
-plot_pdp <- function(df, v) {
+plot_pdp <- function(df, v, ylim=y_rng) {
   df$season <- factor(df$season, levels = season_lv)
 
   base <- theme_bw() +
@@ -473,7 +514,7 @@ fig <- wrap_plots(plots, ncol = 2, guides = "collect") &
   theme(legend.position = "bottom")
 fig
 
-ggsave("pdp_season_interactions.png", plot = fig, width = 11, height = 12, dpi = 300)
+ggsave("03_outputs/01_figures/pdp_season_interactions.png", plot = fig, width = 11, height = 12, dpi = 300)
 
 
 
@@ -484,11 +525,9 @@ ggsave("pdp_season_interactions.png", plot = fig, width = 11, height = 12, dpi =
 #dsitance to land and season 
 #distance to land and depth (should make sense just like depth and SAV)
 
-library(patchwork)
-
 season_lv <- c("Spring", "Summer", "Fall", "Winter")
-zone_levels <- c("Cootes Paradise", "Grindstone", "Carrolls Bay", "Bayfront area",
-                 "West End", "North shore", "Central", "East End")
+zone_levels <- c("Cootes Paradise", "Grindstone", "Carrolls Bay",
+                 "West End", "North Shore", "Central", "East End")
 
 xlabs <- c(fetch = "Fetch", zone = "Zone", depth_m = "Depth (m)",
            shoreline_distance_m = "Distance to shoreline (m)"
@@ -536,7 +575,7 @@ grid_plots <- Map(plot_grid, grid_list, names(grid_list))
 wrap_plots(grid_plots, ncol = 2, guides = "collect") &
   theme(legend.position = "right")
 
-ggsave("pdp_season_grids.png", width = 11, height = 12, dpi = 300)
+ggsave("01_outputs/01_figures/twopdp_season_grids.png", width = 11, height = 12, dpi = 300)
 
 #depth and zone
 # 1. Two-way PDP: zone x depth
@@ -609,78 +648,6 @@ ggplot(grid_zd, aes(zone, sav_bin, fill = mean)) +
         legend.title = element_text(size = 14))
 
 
-##############
-library(patchwork)
-
-season_lv <- c("Spring", "Summer", "Fall", "Winter")
-
-# 1. Finer PDPs for just these three predictors
-focus <- c(dist_to_shoreline_m = "Distance to shoreline (m)",
-           depth_m             = "Depth (m)",
-           SAV                 = "SAV %")
-
-pdp_focus <- lapply(setNames(names(focus), names(focus)), function(v) {
-  pdp::partial(results_HH,
-               pred.var        = c(v, "season"),
-               prob            = TRUE,
-               which.class     = 2,
-               train           = pa_data.train,
-               grid.resolution = 60,
-               progress        = "none")
-})
-
-# 2. Grid plot function: own fill scale, optional custom breaks
-plot_season_grid <- function(df, v, label, breaks = NULL, n_bins = 10,
-                             show_values = FALSE) {
-  df$season <- factor(df$season, levels = season_lv)
-
-  if (is.null(breaks)) {
-    breaks <- seq(min(df[[v]]), max(df[[v]]), length.out = n_bins + 1)
-  }
-  df$bin <- cut(df[[v]], breaks = breaks, include.lowest = TRUE, dig.lab = 4)
-
-  if (anyNA(df$bin)) warning(v, ": some values fall outside your breaks")
-
-  d <- df %>%
-    data.frame() %>%
-    dplyr::filter(!is.na(bin)) %>%
-    dplyr::group_by(bin, season) %>%
-    dplyr::summarise(mean = mean(yhat), .groups = "drop")
-
-  p <- ggplot(d, aes(x = season, y = bin, fill = mean)) +
-    geom_tile(width = 1, height = 0.95) +
-    scale_fill_gradient(low = "white", high = "steelblue") +   # free scale, per plot
-    labs(x = "Season", y = label,
-         fill = bquote("Mean marginal effect" ~ (hat(y)))) +
-    theme_classic() +
-    theme(axis.text.y  = element_text(colour = "black", size = 12),
-          axis.text.x  = element_text(angle = 35, hjust = 1, colour = "black", size = 12),
-          axis.title   = element_text(size = 14),
-          legend.text  = element_text(size = 12),
-          legend.title = element_text(size = 12))
-
-  if (show_values) {
-    p <- p + geom_text(aes(label = sprintf("%.2f", mean)), size = 3)
-  }
-  p
-}
-
-# 3. Plot each one separately
-p_dist  <- plot_season_grid(pdp_focus$dist_to_shoreline_m, "dist_to_shoreline_m",
-                            focus[["dist_to_shoreline_m"]], n_bins = 12)
-p_depth <- plot_season_grid(pdp_focus$depth_m, "depth_m",
-                            focus[["depth_m"]], n_bins = 10)
-p_sav   <- plot_season_grid(pdp_focus$SAV, "SAV",
-                            focus[["SAV"]], n_bins = 10)
-
-p_dist
-p_depth
-p_sav
-
-ggsave("pdp_grid_dist_shoreline.png", p_dist,  width = 6, height = 6, dpi = 300)
-ggsave("pdp_grid_depth.png",          p_depth, width = 6, height = 6, dpi = 300)
-ggsave("pdp_grid_SAV.png",            p_sav,   width = 6, height = 6, dpi = 300)
-
 ##############################
 ## ---- 1. AUC: test set vs spatial CV ----
 auc_test <- mlr::performance(pred_HH, measures = mlr::auc)
@@ -747,7 +714,10 @@ pred_HH_thr <- mlr::setThreshold(pred_HH, best_thr)
 #build the grid dataframe up 
 #50m grid dataframe - see builing PA dataframe code
 #see adding predictors to DF (PA dataframe)
-grid <- read.csv("01_data/02_processed_files/for SAVM/HH_50mGrid_latlon.csv")
+gridnew<-read_excel("01_data/02_processed_files/grid50m_depthsavfetchzone.xls")
+class(gridnew)      # should be "data.frame"
+names(gridnew)      # shows the column names you have
+head(gridnew)
 
 #########
 #Ranger built in function attempt
@@ -758,16 +728,11 @@ pred_rf <- pred_rf$predictions [, 2]
 needed <- results_HH$forest$independent.variable.names
 needed
 
-# 2. Confirm it's a data frame, not a function
-class(grid)      # should be "data.frame"
-names(grid)      # shows the column names you have
-head(grid)
-
 seasons <- data.frame(season = levels(factor(pa_data.train$season)))
-gridseason <- merge(seasons, grid)
+gridseason <- merge(seasons, gridnew)
 gridseason$season <- factor(gridseason$season, levels = levels(factor(pa_data.train$season)))
 # if zone is in the model:
-# gridseason$zone <- factor(gridseason$zone, levels = levels(pa_data.train$zone))
+gridseason$zone <- factor(gridseason$zone, levels = levels(pa_data.train$zone))
 
 gridseason <- gridseason[complete.cases(gridseason[, needed]), ]
 
@@ -801,48 +766,39 @@ ggplot() +
 
 ###second example pick one to keep delete other 
 
-library(dplyr); library(tidyr); library(sf); library(terra)
-library(ggplot2); library(viridis)
+needed <- results_HH$forest$independent.variable.names   # depth_m, SAV, season, zone, fetch, shoreline_distance_m
 
-needed <- results_HH$forest$independent.variable.names
-needed    # every one of these must be a column in the surface, with matching names and levels
+# 1. Prepare the grid (one row per cell)
+surf <- gridnew %>%
+  dplyr::rename(SAV = sav) %>%
+  dplyr::mutate(zone = factor(trimws(as.character(zone)),
+                              levels = levels(pa_data.train$zone)))
 
-# 1. Grid points (rename columns to match your model; edit the right-hand names to your grid)
-surf <- grid %>%
-  transmute(ID, x = longitude    , y = latitude ,
-            depth_m = Depth, SAV = SAV, fetch = Fetch)
+xy <- st_coordinates(st_transform(
+  st_as_sf(surf, coords = c("longitude", "latitude"), crs = 4326, remove = FALSE), 32617))
+surf$x <- xy[, 1]; surf$y <- xy[, 2]
 
-# 2. Corrected distance to shoreline, computed the same way as for the detections
-pts <- st_as_sf(surf, coords = c("x", "y"), crs = 32617, remove = FALSE)
-shore_line <- st_boundary(st_transform(shorelinemap, 32617))
-surf$dist_to_shoreline_m <- as.numeric(apply(st_distance(pts, shore_line), 1, min))
-
-# 3. Zone, only if it is still in the model (zones_sf = your zone polygons with a 'zone' column)
-# surf$zone <- st_join(pts, st_transform(zones_sf, 32617))$zone
-# surf$zone <- factor(trimws(as.character(surf$zone)), levels = levels(pa_data.train$zone))
-
-# 4. One row per cell per season
-season_lv <- levels(factor(pa_data.train$season))
 surf <- surf %>%
   tidyr::crossing(season = season_lv) %>%
-  mutate(season = factor(season, levels = season_lv))
+  dplyr::mutate(season = factor(season, levels = season_lv))
 
-# 5. Predict (ranger errors on NAs, so drop incomplete rows first)
+# 3. Predict
+setdiff(needed, names(surf))          # should be character(0)
 surf <- surf[complete.cases(surf[, needed]), ]
-surf$pred <- predict(results_HH, data = surf[, needed])$predictions[, "pres"]
+surf$pred <- predict(results_HH, data = as.data.frame(surf[, needed]))$predictions[, "pres"]
 
-# 6. Optional mask: cells whose covariates fall outside the sampled range
-covs <- c("depth_m", "SAV", "fetch", "dist_to_shoreline_m")
+# 4. Mask cells outside the sampled range (numeric predictors only)
+covs <- c("depth_m", "SAV", "fetch", "shoreline_distance_m")
 in_range <- Reduce(`&`, lapply(covs, function(v)
   surf[[v]] >= min(pa_data.train[[v]]) & surf[[v]] <= max(pa_data.train[[v]])))
 surf$pred_masked <- ifelse(in_range, surf$pred, NA)
-mean(in_range)   # share of cells inside the sampled range
+mean(in_range)                         # share of cells inside the sampled range
 
-# 7. Map, faceted by season
+# 5. Map by season
 shore <- st_transform(shorelinemap, 32617)
 
 ggplot() +
-  geom_raster(data = surf, aes(x, y, fill = pred_masked)) +
+  geom_tile(data = surf, aes(x, y, fill = pred_masked), width = 50, height = 50) +
   geom_sf(data = shore, fill = NA, colour = "darkgrey", inherit.aes = FALSE) +
   scale_fill_viridis_c(name = "Relative habitat\nsuitability", limits = c(0, 1),
                        na.value = "grey85") +
@@ -851,9 +807,9 @@ ggplot() +
   labs(x = "Easting", y = "Northing") +
   theme_bw() + theme(text = element_text(size = 16))
 
-# 8. GeoTIFFs for GIS (one layer per season)
+# 6. GeoTIFF, one layer per season
 r <- terra::rast(lapply(season_lv, function(s)
-  terra::rast(surf[surf$season == s, c("x", "y", "pred_masked")],
+  terra::rast(as.data.frame(surf[surf$season == s, c("x", "y", "pred_masked")]),
               type = "xyz", crs = "EPSG:32617")))
 names(r) <- season_lv
 terra::writeRaster(r, "HH_suitability_by_season.tif", overwrite = TRUE)

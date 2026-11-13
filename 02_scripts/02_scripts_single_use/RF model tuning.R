@@ -72,7 +72,8 @@ pa_data <- PA_rand_w_depthSAVfetch %>%
     rowID    = seq_len(n())
   )
 
-
+sum(is.na(pa_data$zone))
+unique(pa_data$zone)
 pa_data$zone<-base::as.factor(pa_data$zone)
 
 #split into train and test data
@@ -199,10 +200,8 @@ ggplot(top_2_pdp_HH, aes(x = factor(season, levels = c("Spring", "Summer", "Wint
   )
 
 
-#NAS in the zone so need to go back to where this was assigned to PA dataframe to check whats missing
-
-zone_levels <- c("Cootes Paradise", "Grindstone", "Carrolls Bay", "Bayfront area",
-                 "West End", "North shore", "Central", "East End")
+zone_levels <- c("Cootes Paradise", "Grindstone", "Carrolls Bay",,
+                 "West End", "North Shore", "Central", "East End")
 
 top_3_pdp_HH$zone <- as.character(top_3_pdp_HH$zone)
 top_3_pdp_HH$zone[is.na(top_3_pdp_HH$zone)] <- "North shore"

@@ -313,10 +313,7 @@ ggplot() +
 
 
 #SAV
-#secchi included - cleaned for masking
-#does not include RBG edits 
-#SAV2026_raster <- rast("01_data/02_processed_files/SAV_secchi_1.tif")
-
+#secchi included in SAV layer 
 # ── 1. Load the SAV raster ──────────────────────────────────────────────────
 #raster layer includes post-hoc secchi, masking polygon layer file but NO RBG edits to CPM and GC areas
 
@@ -324,30 +321,14 @@ SAV2026rbgedits_raster <- rast("01_data/02_processed_files/raster layers/sav_rbg
 
 
 print(SAV2026rbgedits_raster)
-plot(SAV2026rbgedits_raster)  # sanity check visual
+plot(SAV2026rbgedits_raster)  
 
 #load the fetch raster layer 
 #fetch raster layer used in larocque et al. 
 #fetch_raster <- rast("01_data/04_shapefiles/Enviro layers/fetchweightedm_2024.tif")
 
-
-#two fetch layers 
-#1 thermocline 
-#2 isocline 
-#just use thermocline for now
-
-
-
-print(SAVnad83_raster)
-plot(SAVnad83_raster)  
-
-
-
 # ── 2. Get unique lat/lon locations ──────────────────────────────────────────
-# Assuming your data has columns: station, deploy_lat, deploy_long
-# (adjust column names to match your actual dataframe)
-#01_data\02_processed_files\PAdata_randomized.rds
-#going to add SAV to depth one
+#going to add SAV to depth 
 PA_rand_w_depth <- readRDS("01_data/02_processed_files/PA_rand_w_depth.rds")
 unique_locs <- PA_rand_w_depth |>
   distinct(transmitter_id, date, station, year, rand_long, rand_lat)
@@ -534,6 +515,8 @@ ggplot() + HH_plot+
 
 #assign each PA randmoized location a unique zone value based on random location 
 
+PA_rand_w_depthSAVfetch<-readRDS("01_data/02_processed_files/PArand_complete.rds")
+
 
 
 
@@ -712,13 +695,46 @@ HH_plot+
 library(readxl)
 gridnew<-read_excel("01_data/02_processed_files/grid50m_depthsavfetchzone.xls")
 
-#add df now with zone layer added to the grid 
-#added in arcgis 
+# Grid points with zone (plain data frame -> sf)
+grid_sf <- st_as_sf(gridnew, coords = c("longitude", "latitude"),
+                    crs = 4326, remove = FALSE) |>
+  dplyr::filter(!is.na(Zone)) |>               # only grid points that have a zone
+  st_transform(32617)
 
-#adding season last, one season per row 
+# PA points: use rand_long / rand_lat (the randomized locations)
+pa_sf <- st_as_sf(PA_rand_w_depthSAVfetch |> st_drop_geometry(),
+                  coords = c("rand_long", "rand_lat"),
+                  crs = 4326, remove = FALSE) |>
+  st_transform(32617)
 
-season_lv <- levels(factor(pa_data.train$season))
-seasons   <- data.frame(season = factor(season_lv, levels = season_lv))
+# Nearest grid point for every PA point
+nn <- st_nearest_feature(pa_sf, grid_sf)
 
-gridseason <- merge(seasons, grid)   # cross join: nrow(grid) * number of seasons rows
-nrow(gridseason) == nrow(grid) * length(season_lv)
+d_m <- as.numeric(st_distance(pa_sf, grid_sf[nn, ], by_element = TRUE))
+summary(d_m)                             # how far each PA point is from its grid point
+
+# Assign zone
+PA_rand_w_depthSAVfetch$zone <- trimws(as.character(grid_sf$Zone[nn]))
+
+#plot to ensure zones were assigned correctly 
+HH_plot+
+  geom_point(data = grid_sf, aes(color = Zone, x=longitude, y=latitude), size = 1.8, alpha = 0.7) +
+  theme_minimal() +
+  labs(x = "Longitude", y = "Latitude")
+
+zone_levels <- c("Cootes Paradise", "Bayfront area", "Carrolls Bay",
+                 "Grindstone", "West End", "Central", "North shore", "East End")
+
+
+HH_plot+
+  geom_point(data = PA_rand_w_depthSAVfetch, aes(rand_long, rand_lat, colour = zone),
+             size = 0.6, alpha = 0.8) +
+  scale_colour_brewer(palette = "Set1", name = "Zone", drop = FALSE, na.value = "black") +
+  guides(colour = guide_legend(override.aes = list(size = 3, alpha = 1))) +
+  coord_sf(crs = 4326) +
+  labs(x = "Longitude", y = "Latitude") +
+  theme_minimal()
+
+#save dataframe
+
+#aveRDS(PA_rand_w_depthSAVfetch, "01_data/02_processed_files/PArand_complete.rds")
