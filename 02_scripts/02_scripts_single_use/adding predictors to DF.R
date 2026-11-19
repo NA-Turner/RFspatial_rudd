@@ -737,4 +737,139 @@ HH_plot+
 
 #save dataframe
 
-#aveRDS(PA_rand_w_depthSAVfetch, "01_data/02_processed_files/PArand_complete.rds")
+#saveRDS(PA_rand_w_depthSAVfetch, "01_data/02_processed_files/PArand_complete.rds")
+
+PAall<-readRDS(file = "01_data/02_processed_files/PArand_complete.rds")
+
+#clean up any dates where teh active tags fell to  <5
+min_fish <- 4
+
+# Unique fish detected as present on each date (geometry dropped only for the count)
+fish_per_date <- PAall |>
+  st_drop_geometry() |>
+  filter(presence == 1) |>
+  group_by(date) |>
+  summarise(n_fish = n_distinct(transmitter_id), .groups = "drop")
+
+
+# Dates that pass
+keep_dates <- fish_per_date |>
+  filter(n_fish >= min_fish) |>
+  pull(date)
+
+# Filter presence AND absence rows by date
+df_filtered <- PAall |>
+  filter(date %in% keep_dates)
+
+# ---- Checks ----
+# Rows and dates before/after
+tibble(
+  stage      = c("before", "after"),
+  n_rows     = c(nrow(PAall), nrow(df_filtered)),
+  n_dates    = c(n_distinct(PAall$date), n_distinct(df_filtered$date)),
+  n_presence = c(sum(PAall$presence == 1), sum(df_filtered$presence == 1)),
+  n_absence  = c(sum(PAall$presence == 0), sum(df_filtered$presence == 0))
+)
+
+# Confirm every remaining date has >= 4 unique fish present
+df_filtered |>
+  st_drop_geometry() |>
+  filter(presence == 1) |>
+  group_by(date) |>
+  summarise(n_fish = n_distinct(transmitter_id), .groups = "drop") |>
+  summarise(min_fish_on_any_date = min(n_fish))   # should be >= 5
+
+# Dates removed, including any date that had absences but no presence rows at all
+removed_dates <- setdiff(unique(PAall$date), keep_dates)
+length(removed_dates)
+
+#saveRDS(df_filtered, "01_data/02_processed_files/PArand_complete_final.rds")
+
+#5 or more fish removed 177 dates from the dataframe 
+#4 or more fish removed 54 dates from the dataframe
+#so 123 dates in the dataframe where only 4 fish are active
+
+print(removed_dates)
+
+
+
+
+
+library(tidyverse)
+library(sf)
+
+# Unique fish present per date, from the dataframe BEFORE date filtering
+fish_per_date <- PAall |>
+  st_drop_geometry() |>
+  filter(presence == 1) |>
+  group_by(date) |>
+  summarise(n_fish = n_distinct(transmitter_id), .groups = "drop")
+
+# Fill in every calendar day within each year's range (days with no detections = 0 fish)
+daily <- tibble(date = seq(min(PAall$date), max(PAall$date), by = "day")) |>
+  mutate(year = year(date)) |>
+  group_by(year) |>
+  filter(date >= min(PAall$date[year(PAall$date) == first(year)]),
+         date <= max(PAall$date[year(PAall$date) == first(year)])) |>
+  ungroup() |>
+  left_join(fish_per_date, by = "date") |>
+  mutate(n_fish = replace_na(n_fish, 0),
+         category = case_when(n_fish >= 5 ~ "5+ fish (in both datasets)",
+                              n_fish == 4 ~ "Exactly 4 (4+ dataset only)",
+                              TRUE        ~ "<4 fish (excluded)"),
+         category = factor(category, levels = c("5+ fish (in both datasets)",
+                                                "Exactly 4 (4+ dataset only)",
+                                                "<4 fish (excluded)")))
+
+# Continuous periods meeting a threshold
+get_runs <- function(d, thr) {
+  d |>
+    mutate(meets = n_fish >= thr) |>
+    group_by(year) |>
+    mutate(run = consecutive_id(meets)) |>
+    filter(meets) |>
+    group_by(year, run) |>
+    summarise(start = min(date), end = max(date), n_days = n(), .groups = "drop") |>
+    mutate(threshold = paste0(thr, "+ fish"))
+}
+
+runs <- bind_rows(get_runs(daily, 5), get_runs(daily, 4)) |>
+  mutate(y = if_else(threshold == "5+ fish", -0.7, -1.5))
+
+# Period summary table
+runs |>
+  select(threshold, year, start, end, n_days) |>
+  arrange(threshold, start)
+
+runs |>
+  group_by(threshold) |>
+  summarise(n_periods = n(), total_days = sum(n_days), longest_period = max(n_days))
+
+cols <- c("5+ fish (in both datasets)" = "#1f5f8b",
+          "Exactly 4 (4+ dataset only)" = "#e08a1e",
+          "<4 fish (excluded)" = "grey80",
+          "5+ fish" = "#1f5f8b",
+          "4+ fish" = "#e08a1e")
+
+p <- ggplot() +
+  geom_line(data = daily, aes(date, n_fish, group = year),
+            colour = "grey50", linewidth = 0.4) +
+  geom_point(data = daily, aes(date, n_fish, colour = category), size = 1.3) +
+  geom_segment(data = runs,
+               aes(x = start - 0.5, xend = end + 0.5, y = y, yend = y, colour = threshold),
+               linewidth = 2.5, lineend = "butt") +
+  geom_hline(yintercept = c(4, 5), linetype = "dashed", colour = "grey40", linewidth = 0.3) +
+  scale_colour_manual(values = cols, name = NULL) +
+  scale_x_date(date_breaks = "1 month", date_labels = "%b %Y") +
+  scale_y_continuous(breaks = function(l) pretty(c(0, l[2])),
+                     expand = expansion(mult = c(0.02, 0.05))) +
+  labs(x = NULL, y = "Number of fish present",
+       title = "Dates retained under 5+ vs 4+ fish thresholds") +
+  theme_bw(base_size = 11) +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major.y = element_blank(),
+        legend.position = "top",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+p
+ggsave("rudd_threshold_comparison_line.png", p, width = 11, height = 5, dpi = 300)

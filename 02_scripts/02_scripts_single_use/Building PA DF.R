@@ -4,7 +4,13 @@
 library(data.table)  
 unique(rudd_dets$glatos_array)
 #date range for the study when we have 4 or more fish avaliable at any given time period
-rudd_dets_updated<-readRDS("RFspatial_rudd/01_data/03_large_files_LFS/Processed_files/Rudddets01062026.rds")
+rudd_dets_updated<-readRDS("01_data/03_large_files_LFS/02_processed_files/Rudddets01062026.rds")
+
+
+#make a figure here for number of unique fish detected per day plot for supp
+
+
+
 
 #this is for 4 fish active at one time
 #daily presence= 8000 detections i.e too much for a RFspatial model to handle
@@ -295,5 +301,81 @@ if (all(balance_check$balanced)) {
 unique(pa_data$station)
 
 #save the dataframe 
-saveRDS(pa_data, file = "01_data/02_processed_files/Rudd_5active_PAdata.rds")
+#saveRDS(pa_data, file = "01_data/02_processed_files/Rudd_5active_PAdata.rds")
+
+active<-readRDS(file = "01_data/02_processed_files/Rudd_5active_PAdata.rds")
+
+#plot these fish up 
+library(tidyverse)
+library(sf)
+
+dat <- PA_rand_w_depthSAVfetch |>
+  st_drop_geometry() |>
+  as_tibble()
+
+daily <- dat |>
+  filter(presence == 1) |>
+  distinct(transmitter_id, year, date)
+
+# First/last detection per transmitter, used for the line and for ordering the y-axis
+spans <- daily |>
+  group_by(transmitter_id, year) |>
+  summarise(first = min(date), last = max(date), .groups = "drop") |>
+  arrange(year, first) |>
+  mutate(id = factor(transmitter_id, levels = unique(transmitter_id)))
+
+daily <- daily |>
+  mutate(id = factor(transmitter_id, levels = levels(spans$id)))
+
+p <- ggplot() +
+  geom_segment(data = spans,
+               aes(x = first, xend = last, y = id, yend = id),
+               colour = "grey60", linewidth = 0.4) +
+  geom_point(data = daily,
+             aes(x = date, y = id),
+             shape = 15, size = 1.2, colour = "#1f5f8b") +
+  scale_x_date(date_breaks = "1 month", date_labels = "%b") +
+  labs(x = NULL, y = "Transmitter ID",
+       title = "Daily presence of Rudd in the receiver array") +
+  theme_bw(base_size = 11) +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.y = element_text(size = 14))
+
+p
+
+ggsave("rudd_presence.png", p, width = 9, height = 8, dpi = 300)
+
+
+
+# Distinct fish-days with a detection
+fish_days <- active |>
+  filter(presence == 1) |>
+  distinct(transmitter_id, year, date)
+
+# Every calendar day in each year's tracking window
+all_days <- fish_days |>
+  group_by(year) |>
+  summarise(date = list(seq(min(date), max(date), by = "day")), .groups = "drop") |>
+  unnest(date)
+
+# Fish detected per day
+detected <- fish_days |>
+  count(date, name = "n_detected")
+
+
+p <- ggplot(detected, aes(date, n_detected)) +
+  geom_point() +
+  scale_x_date(date_breaks = "1 month", date_labels = "%b %Y") +
+  scale_y_continuous(breaks = scales::breaks_pretty(),
+                     expand = expansion(mult = c(0, 0.05))) +
+  labs(x = NULL, y = "Number of fish",
+       title = "Number of Rudd tracked per day") +
+  theme_bw(base_size = 11) +
+  theme(panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+p
+
+ggsave("rudd_n_tracked.png", p, width = 10, height = 4.5, dpi = 300)
 
