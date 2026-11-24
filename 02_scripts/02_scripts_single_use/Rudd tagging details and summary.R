@@ -7,19 +7,23 @@ library(readr)
 library(readxl)
 library(tidyverse)
 #gathering a table of Rudd tagging details for Rudd used in final analysis 
-PA_rand_w_depthSAVfetch<-readRDS("01_data/02_processed_files/PA_rand_w_depthSAVfetch.rds")
+PA_rand_w_depthSAVfetch<-readRDS("01_data/02_processed_files/PArand_complete_final.rds")
 
 #proccessed but larger telem detection dataframe 
-rudd_dets<-readRDS("01_data/03_large_files_LFS/02_processed_files/Rudddets01062026.rds")
-library(tidyverse)
+#larger full Rudd dataframe not used in full for the Random Forest model
+# rudd_dets<-readRDS("01_data/03_large_files_LFS/02_processed_files/Rudddets01062026.rds")
+#library(tidyverse)
 
-threshold <- 5
-colnames(rudd_dets)
+threshold <- 4
+colnames(PA_rand_w_depthSAVfetch)
 # first and last detection per fish
-fish <- rudd_dets |>
+#change from sf object
+
+fish <- PA_rand_w_depthSAVfetch |>
+  sf::st_drop_geometry() |>
   group_by(transmitter_id) |>
-  summarise(start = as.Date(min(detection_timestamp_EST)),
-            end   = as.Date(max(detection_timestamp_EST))) |>
+  summarise(start = as.Date(min(date)),
+            end   = as.Date(max(date))) |>
   arrange(desc(start), transmitter_id) |>
   mutate(transmitter_id = factor(transmitter_id, levels = transmitter_id))
 
@@ -34,18 +38,17 @@ orange <- tibble(date = seq(min(fish$start), max(fish$end), by = "day")) |>
 
 ggplot() +
   geom_rect(data = orange, aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf),
-            fill = "#E8CFA0") +
+            fill = "#cac4b9", alpha=0.7) +
   geom_segment(data = fish, aes(x = start, xend = end,
                                 y = transmitter_id, yend = transmitter_id),
                linewidth = 0.8) +
   geom_point(data = fish, aes(start, transmitter_id), colour = "darkgreen", size = 1.8) +
   geom_point(data = fish, aes(end, transmitter_id),   colour = "darkred",   size = 1.8) +
   scale_x_date(date_breaks = "1 month", date_labels = "%b %Y") +
-  labs(title = paste0("Fish Detection Timelines (Orange = ", threshold, "+ Active Fish)"),
-       x = "Date", y = "Transmitter ID") +
-  theme_minimal(base_size = 10) +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6),
-        panel.grid.minor = element_blank())
+  labs(x = "Date", y = "Fish ID") +
+  theme_minimal(base_size = 20) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 12),
+      panel.grid.minor = element_blank())
 
 
 orange_periods <- orange |>
@@ -55,9 +58,35 @@ orange_periods <- orange |>
 
 orange_periods
 #goes utnil 11-25-2025 but we cut it off beginning of sept
+outside <- tibble(
+  transmitter_id = c("1386", "508"),
+  start = as.Date(c("2023-07-06", "2024-05-21")),
+  end   = as.Date(c("2023-12-09", "2025-04-11"))
+)
 
-
-
+ggplot() +
+  geom_rect(data = orange, aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf),
+            fill = "#cac4b9", alpha = 0.7) +
+  geom_segment(data = fish, aes(x = start, xend = end,
+                                y = transmitter_id, yend = transmitter_id,
+                                colour = "In array"),
+               linewidth = 0.8) +
+  geom_segment(data = outside, aes(x = start, xend = end,
+                                   y = transmitter_id, yend = transmitter_id,
+                                   colour = "Active, outside array"),
+               linewidth = 0.8) +
+  geom_point(data = fish, aes(start, transmitter_id), colour = "darkgreen", size = 1.8) +
+  geom_point(data = fish, aes(end, transmitter_id),   colour = "darkred",   size = 1.8) +
+  scale_colour_manual(values = c("In array" = "black",
+                                 "Active, outside array" = "#f72d2dc5"),
+                      name = NULL) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b %Y",
+               guide = guide_axis(check.overlap = TRUE)) +
+  labs(x = "Date", y = "Fish ID") +
+  theme_minimal(base_size = 20) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 12),
+        panel.grid.minor = element_blank(),
+        legend.position = "top")
 ###rudd that are included in this analsis. tag details. 
 
 # 497  498  499  501  502  507  508  509  510  512  514  515  516 1366 1368 1370 1374 1386 1398 9149 9150 9157

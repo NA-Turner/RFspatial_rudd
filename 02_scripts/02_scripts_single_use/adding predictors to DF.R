@@ -164,19 +164,19 @@ unique(pa_data$buffer_m)
 
 #add seasonal time binning 
 
-pa_data <- pa_data %>%
- mutate(
-  month_num = as.numeric(format(date, "%m")),
-  day_num = as.numeric(format(date, "%d")),
-  season = case_when(
-   (month_num == 4 & day_num >= 1) | month_num == 5 | (month_num == 6 & day_num <= 15) ~ "Spring",
-   (month_num == 6 & day_num >= 16) | month_num %in% c(7, 8, 9) | (month_num == 10 & day_num <= 3) ~ "Summer",
-   (month_num == 10 & day_num >= 4) | month_num == 11 & day_num <= 15 ~ "Fall",
-   (month_num == 11 & day_num >= 16) | month_num %in% c(12, 1, 2) | (month_num == 3 & day_num <= 31) ~ "Winter",
-   TRUE ~ NA_character_
-  )
- )
 
+pa_data <- pa_data %>%
+  mutate(
+    month_num = as.numeric(format(date, "%m")),
+    day_num = as.numeric(format(date, "%d")),
+    season = case_when(
+      (month_num == 4 & day_num >= 1) | month_num == 5 | (month_num == 6 & day_num <= 15) ~ "Spring",
+      (month_num == 6 & day_num >= 16) | month_num %in% c(7, 8, 9) | (month_num == 10 & day_num <= 3) ~ "Summer",
+      (month_num == 10 & day_num >= 4) | (month_num == 11 & day_num <= 17) ~ "Fall",
+      (month_num == 11 & day_num >= 18) | month_num %in% c(12, 1, 2, 3) ~ "Winter",
+      TRUE ~ NA_character_
+    )
+  )
 
 #saveRDS(pa_data,file = "01_data/02_processed_files/PA RFspatial Rudd.rds")
 

@@ -1,6 +1,11 @@
 ####
+##check through this code but likely can delete the entire thing!
+####################
+
 #second Rudd RF model attempt
 #adding month as a predictor variable 
+
+
 
 library(here)
 library(terra)
@@ -47,7 +52,7 @@ plot(fetch2026_raster)
 PA_rand_w_depthSAVfetch<-readRDS("01_data/02_processed_files/PArand_complete.rds")
 # Row ID for indexing
 PA_rand_w_depthSAVfetch$rowID <- seq_len(nrow(PA_rand_w_depthSAVfetch))
-
+orang
 set.seed(1234)
 
 is.na(PA_rand_w_depthSAVfetch$zone)

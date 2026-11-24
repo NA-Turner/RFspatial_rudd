@@ -149,7 +149,6 @@ oob_df <- data.frame(
   brier     = unlist(oob_curve)
 )
 
-library(ggplot2)
 ggplot(oob_df, aes(num.trees, brier)) +
   stat_summary(fun = mean, geom = "line") +
   stat_summary(fun.data = mean_se, geom = "pointrange") +
@@ -161,10 +160,9 @@ ggplot(oob_df, aes(num.trees, brier)) +
 #here is would be aout 1000 trees
 
 
-
-
 # Final learner + training
 # new learner is built with hyperparameters that came out on top (from above code)
+#if changing anything....
 lrn_rf.Bin <- setHyperPars(makeLearner("classif.ranger", importance = "impurity",
                                         predict.type = "prob", num.trees=1000), par.vals = tune_HH$x)
 set.seed(1234)
@@ -316,7 +314,9 @@ predrank<-ggplot(imp_mse, aes(mean_inc, reorder(label, mean_inc))) +
        y = NULL) +
   theme_bw() +
   theme(axis.text = element_text(size = 14), axis.title = element_text(size = 16))
-ggsave("03_outputs/01_figures/pred_rank.png", plot = predrank, width = 11, height = 12, dpi = 300)
+
+
+# ggsave("03_outputs/01_figures/pred_rank.png", plot = predrank, width = 11, height = 12, dpi = 300)
 
 predrank
 
@@ -504,16 +504,15 @@ vars <- vars[vars %in% X_cols & vars != "season"]
 vars
 
 # ---- 3. Two-way PDPs: each partner x season ----
-pdp_list <- map(set_names(vars), function(v) {
+pdp_list <- purrr::map(purrr::set_names(vars), function(v) {
   pdp::partial(results_HH,
                pred.var        = c(v, "season"),
                prob            = TRUE,
                which.class     = 2,
-               train           = X_HH_sub,       # predictors only, same columns as the model
+               train           = X_HH_sub,
                grid.resolution = 30,
                progress        = "none")
 })
-
 # ---- 4. One shared y-range, so every panel is comparable ----
 y_rng <- range(unlist(map(pdp_list, ~ range(.x$yhat, na.rm = TRUE))))
 y_rng <- c(floor(y_rng[1] * 20) / 20, ceiling(y_rng[2] * 20) / 20)
@@ -530,7 +529,6 @@ plot_pdp <- function(df, v, ylim=y_rng) {
 
   if (is.numeric(df[[v]])) {
     ggplot(df, aes(.data[[v]], yhat, colour = season, group = season)) +
-      geom_smooth(linewidth = 1.1) +
       scale_colour_manual(values = season_cols, name = "Season", drop = FALSE) +
       labs(x = lab(v), y = bquote("Marginal effect" ~ (hat(y)))) +base
   } else {
@@ -1235,8 +1233,9 @@ plot_pdp <- function(df, v, ylim=y_rng) {
 
   if (is.numeric(df[[v]])) {
     ggplot(df, aes(.data[[v]], yhat, colour = season, group = season)) +
-      geom_smooth(linewidth = 1.1) +
-      scale_colour_manual(values = season_cols, name = "Season", drop = FALSE) +
+      geom_line(linewidth = 1.1) +
+      scale_colour_manual(values = season_cols, name = "Season", drop = FALSE, 
+    guide="none") +
       labs(x = lab(v), y = bquote("Marginal effect" ~ (hat(y)))) +base
   } else {
     ggplot(df, aes(.data[[v]], yhat, fill = season)) +
@@ -1258,191 +1257,95 @@ fig
 #ggsave("03_outputs/01_figures/pdp_season_interactions.png", plot = fig, width = 11, height = 12, dpi = 300)
 
 
-#top 3 two-way interaction plots as grids 
-#could you add season as a colour?
-#grids for depth and zone
-#SAV season allows us to narrow in on smaller bins for SAV
-#dsitance to land and season 
-#distance to land and depth (should make sense just like depth and SAV)
-
-season_lv <- c("Spring", "Summer", "Fall", "Winter")
+##plot out in grids two-way interactions so we can better visualize them 
+season_lv   <- c("Spring", "Summer", "Fall", "Winter")
 zone_levels <- c("Cootes Paradise", "Grindstone", "Carrolls Bay",
                  "West End", "North Shore", "Central", "East End")
 
 xlabs <- c(fetch = "Fetch", zone = "Zone", depth_m = "Depth (m)",
-           shoreline_distance_m = "Distance to shoreline (m)"
-           , SAV = "SAV %")
+           shoreline_distance_m = "Distance to shoreline (m)", SAV = "SAV (%)")
 
-# bin the predictor (continuous only) and average yhat per bin x season
-make_grid_df <- function(df, v, n_bins = 8) {
+# ---- per-variable settings: edit these ------------------------------------
+# binwidth    : width of each y bin (NULL = 15 equal bins)
+# y_breaks    : axis tick positions (NULL = ggplot default)
+# fill_limits : colour range c(min, max) (NULL = this plot's own range)
+# option      : viridis palette ("viridis","magma","plasma","inferno","cividis","mako","rocket","turbo")
+#to set proper bin widths... bins = range / binwidth
+
+cfg <- list(
+  SAV                  = list(binwidth = 5, y_breaks = NULL, fill_limits = NULL, option = "viridis"),
+  depth_m              = list(binwidth = 2, y_breaks = NULL,           fill_limits = NULL, option = "viridis"),
+  fetch                = list(binwidth = NULL, y_breaks = NULL,          fill_limits = NULL, option = "viridis"),
+  shoreline_distance_m = list(binwidth = 50,  y_breaks = NULL,           fill_limits = NULL, option = "viridis"),
+  zone                 = list(binwidth = NULL, y_breaks = NULL,          fill_limits = NULL, option = "viridis")
+)
+
+# ---- bin + average yhat per bin x season ----------------------------------
+make_grid_df <- function(df, v, binwidth = NULL, n_bins = 15) {
+  df <- data.frame(df)
   df$season <- factor(df$season, levels = season_lv)
 
   if (is.numeric(df[[v]])) {
-    brks <- seq(min(df[[v]]), max(df[[v]]), length.out = n_bins + 1)
-    df$bin <- cut(df[[v]], breaks = brks, include.lowest = TRUE, dig.lab = 4)
+    rng <- range(df[[v]])
+    if (is.null(binwidth)) binwidth <- diff(rng) / n_bins
+    brks <- seq(floor(rng[1] / binwidth) * binwidth,
+                ceiling(rng[2] / binwidth) * binwidth, by = binwidth)
+    idx  <- cut(df[[v]], brks, labels = FALSE, include.lowest = TRUE)
+    df$bin <- (brks[idx] + brks[idx + 1]) / 2          # numeric bin midpoint
   } else {
     df$bin <- if (v == "zone") factor(df[[v]], levels = zone_levels) else factor(df[[v]])
   }
 
-  df %>%
-    data.frame() %>%
-    dplyr::group_by(bin, season) %>%
+  df |>
+    dplyr::group_by(bin, season) |>
     dplyr::summarise(mean = mean(yhat), .groups = "drop")
 }
 
-grid_list <- lapply(names(pdp_list), function(v) make_grid_df(pdp_list[[v]], v))
-names(grid_list) <- names(pdp_list)
+# ---- one plot ---------------------------------------------------------------
+plot_grid <- function(d, v, binwidth = NULL, y_breaks = NULL,
+                      fill_limits = NULL, option = "viridis") {
 
-# common colour scale across panels so they are comparable
-fill_rng <- range(unlist(lapply(grid_list, function(d) range(d$mean))))
+  is_num <- is.numeric(d$bin)
 
-plot_grid <- function(d, v) {
-  ggplot(d, aes(x = season, y = bin, fill = mean)) +
-    geom_tile(width = 1, height = 0.9) +
-    scale_fill_gradient(low = "white", high = "steelblue", limits = fill_rng) +
-    labs(x = "Season", y = xlabs[[v]],
-         fill = bquote("Mean marginal effect" ~ (hat(y)))) +
-    theme_classic() +
-    theme(axis.text.y = element_text(colour = "black", size = 11),
-          axis.text.x = element_text(angle = 35, hjust = 1, colour = "black", size = 12),
-          axis.title  = element_text(size = 14),
-          legend.text = element_text(size = 12),
-          legend.title = element_text(size = 12))
+  p <- ggplot(d, aes(x = season, y = bin, fill = mean))
+
+  if (is_num) {
+    p <- p + geom_raster() +                                    # continuous: no gaps
+      scale_y_continuous(breaks = y_breaks %||% waiver(),
+                         expand = expansion(mult = 0.02))
+  } else {
+    p <- p + geom_tile(width = 1, height = 1)                   # categorical: full-height rows
+  }
+
+  p +
+    scale_fill_viridis_c(limits = fill_limits, option = option, na.value = "grey90") +
+    labs(x = "Season", y = xlabs[[v]], fill = bquote(hat(y))) +
+    theme_bw() +
+    theme(axis.text.y  = element_text(colour = "black", size = 14),
+          axis.text.x  = element_text(colour = "black", size = 14),
+          axis.title   = element_text(size = 14),
+          legend.text  = element_text(size = 12),
+          legend.title = element_text(size = 14))
 }
 
-grid_plots <- Map(plot_grid, grid_list, names(grid_list))
+# ---- build everything from the config --------------------------------------
+grid_plots <- lapply(names(pdp_list), function(v) {
+  s <- cfg[[v]]
+  d <- make_grid_df(pdp_list[[v]], v, binwidth = s$binwidth)
+  plot_grid(d, v, binwidth = s$binwidth, y_breaks = s$y_breaks,
+            fill_limits = s$fill_limits, option = s$option)
+})
+names(grid_plots) <- names(pdp_list)
 
-wrap_plots(grid_plots, ncol = 2, guides = "collect") &
-  theme(legend.position = "right")
+# individual plots
+grid_plots$SAV
+grid_plots$depth_m
+grid_plots$zone
+
+# combined (no guides = "collect", since each panel now has its own colour scale)
+patchwork::wrap_plots(grid_plots, ncol = 2)
 
 #ggsave("01_outputs/01_figures/twopdp_season_grids.png", width = 11, height = 12, dpi = 300)
-
-#depth and zone
-# 1. Two-way PDP: zone x depth
-pdp_zd <- pdp::partial(results_HH,
-                       pred.var        = c("zone", "depth_m"),
-                       prob            = TRUE,
-                       which.class     = 2,
-                       train           = X_HH_sub,
-                       grid.resolution = 30,
-                       progress        = "none")
-
-pdp_zd$zone <- factor(trimws(as.character(pdp_zd$zone)), levels = zone_levels)
-
-# 2. Bin depth and average yhat within each zone x depth bin
-n_bins <- 8
-brks <- seq(min(pdp_zd$depth_m), max(pdp_zd$depth_m), length.out = n_bins + 1)
-pdp_zd$depth_bin <- cut(pdp_zd$depth_m, breaks = brks, include.lowest = TRUE, dig.lab = 3)
-
-grid_zd <- pdp_zd %>%
-  data.frame() %>%
-  group_by(zone, depth_bin) %>%
-  summarise(mean = mean(yhat), .groups = "drop")
-
-# 3. Plot
-ggplot(grid_zd, aes(zone, depth_bin, fill = mean)) +
-  geom_tile(colour = "white") +
-  scale_fill_gradient(low = "white", high = "steelblue",
-                      name = expression("Marginal effect" ~ (hat(y)))) +
-  labs(x = "Zone", y = "Depth (m)") +
-  theme_bw() +
-  theme(axis.text.x  = element_text(angle = 35, hjust = 1, size = 14),
-        axis.text.y  = element_text(size = 14),
-        axis.title   = element_text(size = 16),
-        legend.text  = element_text(size = 12),
-        legend.title = element_text(size = 14))
-
-#SAV and zone 
-
-pdp_zd <- pdp::partial(results_HH,
-                       pred.var        = c("zone", "SAV"),
-                       prob            = TRUE,
-                       which.class     = 2,
-                       train           = X_HH_sub,
-                       grid.resolution = 30,
-                       progress        = "none")
-
-pdp_zd$zone <- factor(trimws(as.character(pdp_zd$zone)), levels = zone_levels)
-
-# 2. Bin depth and average yhat within each zone x depth bin
-n_bins <- 8
-brks <- seq(min(pdp_zd$SAV), max(pdp_zd$SAV), length.out = n_bins + 1)
-pdp_zd$sav_bin <- cut(pdp_zd$SAV, breaks = brks, include.lowest = TRUE, dig.lab = 3)
-
-grid_zd <- pdp_zd %>%
-  data.frame() %>%
-  group_by(zone, sav_bin) %>%
-  summarise(mean = mean(yhat), .groups = "drop")
-
-# 3. Plot
-ggplot(grid_zd, aes(zone, sav_bin, fill = mean)) +
-  geom_tile(colour = "white") +
-  scale_fill_gradient(low = "white", high = "steelblue",
-                      name = expression("Marginal effect" ~ (hat(y)))) +
-  labs(x = "Zone", y = "SAV (%)") +
-  theme_bw() +
-  theme(axis.text.x  = element_text(angle = 35, hjust = 1, size = 14),
-        axis.text.y  = element_text(size = 14),
-        axis.title   = element_text(size = 16),
-        legend.text  = element_text(size = 12),
-        legend.title = element_text(size = 14))
-
-
-##############################
-## ---- 1. AUC: test set vs spatial CV ----
-auc_test <- mlr::performance(pred_HH, measures = mlr::auc)
-auc_test
-
-tune_HH$y          
-
-# spatial CV AUC for the best hyperparameters (auc.test.mean)
-
-# If the test AUC is clearly higher than the spatial CV AUC, the random
-# test split is probably flattering the model (spatial autocorrelation).
-
-
-## ---- 2. ROC curve (test set) ----
-roc_df <- mlr::generateThreshVsPerfData(
-  pred_HH, measures = list(mlr::fpr, mlr::tpr, mlr::tnr)
-)$data
-
-ggplot(roc_df, aes(x = fpr, y = tpr)) +
-  geom_abline(linetype = "dashed", colour = "grey50") +
-  geom_line(colour = "purple", linewidth = 1.2) +
-  coord_equal() +
-  labs(x = "False positive rate (1 - specificity)",
-       y = "True positive rate (sensitivity)",
-       title = sprintf("Test-set ROC (AUC = %.3f)", auc_test)) +
-  theme_bw() +
-  theme(axis.text  = element_text(size = 14),
-        axis.title = element_text(size = 16))
-
-
-## ---- 3. Choose a threshold from spatial CV predictions (not the test set) ----
-set.seed(1234)
-rs <- mlr::resample(lrn_rf.Bin, task.train, resampling = perf_level,
-                    measures = mlr::auc, show.info = FALSE)
-rs$aggr   # pooled spatial CV AUC
-
-cv_thr <- mlr::generateThreshVsPerfData(
-  rs$pred, measures = list(mlr::tpr, mlr::tnr)
-)$data
-
-# Youden's J / TSS = sensitivity + specificity - 1
-cv_thr$TSS <- cv_thr$tpr + cv_thr$tnr - 1
-best_thr   <- cv_thr$threshold[which.max(cv_thr$TSS)]
-best_thr
-
-ggplot(cv_thr, aes(x = threshold, y = TSS)) +
-  geom_line(linewidth = 1.1, colour = "purple") +
-  geom_vline(xintercept = best_thr, linetype = "dashed") +
-  theme_bw() +
-  labs(x = "Probability threshold", y = "TSS (sens + spec - 1)")
-
-
-## ---- 4. Confusion matrix on the test set at that threshold ----
-pred_HH_thr <- mlr::setThreshold(pred_HH, best_thr)
-(performance_HH_thr <- mlr::calculateROCMeasures(pred_HH_thr))
 
 
 
@@ -1469,10 +1372,6 @@ needed
 seasons <- data.frame(season = levels(factor(pa_data.train$season)))
 gridseason <- merge(seasons, gridnew)
 gridseason$season <- factor(gridseason$season, levels = levels(factor(pa_data.train$season)))
-
-
-
-# if zone is in the model:
 gridseason$zone <- factor(gridseason$zone, levels = levels(pa_data.train$zone))
 
 gridseason <- gridseason[complete.cases(gridseason[, needed]), ]
@@ -1484,10 +1383,6 @@ shore <- st_transform(shorelinemap, 32617)
 #i.e. setting SAV to 0 for the winter months. 
 #if the grid also has season in it then for the winter months we need to change SAV to 0 here aswell. 
 
-pred_rf<-predict(model_rf.Bin_HH, task.test, type="response")
-pred_rf <- pred_rf$predictions [, 2]
-
-needed <- results_HH$forest$independent.variable.names   # depth_m, SAV, season, zone, fetch, shoreline_distance_m
 
 # 1. Prepare the grid (one row per cell)
 surf <- gridnew %>%
@@ -1509,6 +1404,7 @@ surf <- surf[complete.cases(surf[, needed]), ]
 surf$pred <- predict(results_HH, data = as.data.frame(surf[, needed]))$predictions[, "pres"]
 
 # 4. Mask cells outside the sampled range (numeric predictors only)
+#deals with small holes in map (just interpolates)
 covs <- c("depth_m", "SAV", "fetch", "shoreline_distance_m")
 in_range <- Reduce(`&`, lapply(covs, function(v)
   surf[[v]] >= min(pa_data.train[[v]]) & surf[[v]] <= max(pa_data.train[[v]])))
@@ -1529,10 +1425,14 @@ ggplot() +
   theme_bw() + theme(text = element_text(size = 20))
 
 
+###get total km2 used in each season based on >=75% 
 
+cell_km2 <- (50 * 50) / 1e6                  # 0.0025 km2 per 50 m cell
 
-
-
-######to get total area km2 for >0.8 presence of rudd during each season 
-area<-gridseason2 %>% group_by(thermo_season) %>% summarize(sum=sum(RFpred >=0.8)*2500/1000000) ###2500=area of cell in m and 1000000 is conversion from m2 to km2
-#write.csv(area,paste0("./Results/New/",spp[i],"/",spp[i],"_area_80plus_", WL,".csv"))
+area <- surf %>%
+  dplyr::group_by(season) %>%
+  dplyr::summarise(
+    n_cells_all    = sum(pred >= 0.75, na.rm = TRUE),
+    km2_all        = n_cells_all * cell_km2,        
+    .groups = "drop")
+area
