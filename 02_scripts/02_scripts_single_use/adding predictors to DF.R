@@ -95,8 +95,7 @@ sum(297+290+266+264+264)/5
 
 ##assign isocline/thermocline to PA dataframe 
 
-#file from Building PA script
-#saveRDS(pa_data, file = "01_data/02_processed_files/Rudd_5active_PAdata.rds")
+pa_data<-readRDS("01_data/02_processed_files/PAdata_randomized.rds")
 
 pa_data$thermal <- ifelse(
   format(pa_data$date, "%m-%d") >= "10-06" | format(pa_data$date, "%m-%d") <= "06-06",
@@ -131,7 +130,7 @@ unique(pa_data$station)
 #will have to plot thermo/iso on map to validate that all points were assigned and were assigned correctly 
 
 
-ggplot(data = HH_gcmap) +
+ggplot(data = HH_plot) +
   geom_sf(fill = "lightblue", color = "white") +
   geom_point(data = pa_data, 
              aes(x = deploy_long, y = deploy_lat, color = stationloc)) +
@@ -163,6 +162,7 @@ unique(pa_data$buffer_m)
 #look at brownscombe code for this aswell to help in coding 
 
 #add seasonal time binning 
+pa_data<-readRDS("01_data/02_processed_files/PAdata_randomized.rds")
 
 
 pa_data <- pa_data %>%
@@ -204,12 +204,12 @@ pa_data <- pa_data %>%
 
 #extract depth points 
 # Load the depth raster ──────────────────────────────────────────────────
-depth_raster <- rast("01_data/02_processed_files/SL enviro layers/WL.tif")
+depth_raster<-rast("01_data/02_processed_files/raster layers/depth/WL.tif")
 print(depth_raster)
 plot(depth_raster)  
 
 
-unique_locs <- det_randomized |>
+unique_locs <- pa_data |>
   distinct(transmitter_id, date, station, year, rand_long, rand_lat)
 
 # ── 3. Convert to sf points — 
@@ -234,7 +234,7 @@ unique_locs_depth <- unique_locs |>
   mutate(ID = row_number()) |>                        # create matching ID
   left_join(depth_vals, by = "ID") |>                 # join on position
   rename(depth_m = names(depth_raster)[1]) |>         # rename by layer name
-  select(-ID)
+  dplyr::select(-ID)
 
 
 # ── Split into complete and NA sets ──────────────────────────────────────────
@@ -261,17 +261,16 @@ locs_na <- locs_na |>
 unique_locs_depth <- bind_rows(locs_complete, locs_na)
 
 # ── Join back to pa_data ──────────────────────────────────────────────────────
-det_randomized <- det_randomized |>
+pa_data <- pa_data |>
   left_join(unique_locs_depth,
             by = c("transmitter_id", "date","year", "station", "rand_lat", "rand_long"))
 
-#save for now can delete later once we add in more variables 
-#saveRDS(det_randomized, "c:/Users/TURNERN/Documents/For Github/RFspatial_rudd/01_data/02_processed_files/PA_rand_w_depth.rds")
-
 library(ggplot2)
 
-#plotting code to make sure depths look like they were generally correctly assigned 
-
+HH_plot <- st_read(
+  "01_data/04_shapefiles/HH_Poly_Mar2025/HH_WaterLinesToPoly_21Mar2025.shp",
+  quiet = TRUE
+) %>% st_transform(4326)
 
 locs_depth_sf <- st_as_sf(
   unique_locs_depth,
@@ -280,28 +279,8 @@ locs_depth_sf <- st_as_sf(
 )
 
 ggplot() +
-  geom_sf(data = HH_plot,
-          fill = "aliceblue",
-          color = "steelblue") +
-  geom_sf(data = locs_depth_sf,
-          aes(colour = depth_m),
-          size = 2) +
-    geom_sf(data = buffers_plot, aes (fill = thermal),alpha = 0.005 
-          , linewidth = 0.3, linetype = "dashed") +
-  scale_colour_viridis_c(
-    option = "mako",
-    direction = -1,
-    name = "Depth (m)"
-  ) +
-  coord_sf() +
-  theme_minimal()
-
-
-ggplot() +
   geom_sf(data = HH_plot, fill = "aliceblue", color = "steelblue", linewidth = 0.4) +
-  geom_sf(data = buffers_plot, aes (fill = thermal),alpha = 0.5 
-          , linewidth = 0.3, linetype = "dashed") +
-  geom_sf(data = locs_nasf1,
+  geom_sf(data = locs_depth_sf,
           size = 1.8, alpha = 0.7, aes(color=depth_m)) +
    coord_sf(xlim = c(-79.94, -79.85),
            ylim = c(43.27, 43.30),
@@ -319,7 +298,6 @@ ggplot() +
 
 SAV2026rbgedits_raster <- rast("01_data/02_processed_files/raster layers/sav_rbgedits1")
 
-
 print(SAV2026rbgedits_raster)
 plot(SAV2026rbgedits_raster)  
 
@@ -327,16 +305,7 @@ plot(SAV2026rbgedits_raster)
 #fetch raster layer used in larocque et al. 
 #fetch_raster <- rast("01_data/04_shapefiles/Enviro layers/fetchweightedm_2024.tif")
 
-# ── 2. Get unique lat/lon locations ──────────────────────────────────────────
-#going to add SAV to depth 
-PA_rand_w_depth <- readRDS("01_data/02_processed_files/PA_rand_w_depth.rds")
-unique_locs <- PA_rand_w_depth |>
-  distinct(transmitter_id, date, station, year, rand_long, rand_lat)
 
-# ── 3. Convert to sf points — use WGS84 (EPSG:4326) since coords are lat/lon ─
-locs_sf <- st_as_sf(unique_locs,
-                    coords = c("rand_long", "rand_lat"),
-                    crs    = 4326)
 
 # ── 4. Reproject points to match the raster CRS ──────────────────────────────
 # terra and sf need matching CRS for extraction to work correctly
@@ -355,7 +324,7 @@ unique_locs_sav <- unique_locs |>
   mutate(ID = row_number()) |>                        # create matching ID
   left_join(SAV_vals, by = "ID") |>                 # join on position
   rename(SAV = names(SAV2026rbgedits_raster)[1]) |>         # rename by layer name
-  select(-ID)
+  dplyr::select(-ID)
 
 
 # ── Split into complete and NA sets ──────────────────────────────────────────
@@ -374,7 +343,7 @@ na_sf <- st_as_sf(locs_na,
 # ── For each NA point, find the nearest non-NA point ─────────────────────────
 nearest_idx <- st_nearest_feature(na_sf, complete_sf)
 
-# ── Borrow depth from the nearest complete point ──────────────────────────────
+# ── Borrow sav from the nearest complete point ──────────────────────────────
 locs_na <- locs_na |>
   mutate(SAV = locs_complete$SAV[nearest_idx])
 
@@ -382,12 +351,9 @@ locs_na <- locs_na |>
 unique_locs_sav1 <- bind_rows(locs_complete, locs_na)
 
 # ── Join back to pa_data ──────────────────────────────────────────────────────
-det_randomized <- PA_rand_w_depth |>
+pa_data <- pa_data |>
   left_join(unique_locs_sav1,
             by = c("transmitter_id", "date","year", "station", "rand_lat", "rand_long"))
-
-#save for now can delete later once we add in more variables 
-#saveRDS(det_randomized, "c:/Users/TURNERN/Documents/For Github/RFspatial_rudd/01_data/02_processed_files/PA_rand_w_depthSAV.rds")
 
 locs_sav_sf <- st_as_sf(
   unique_locs_sav1,
@@ -395,23 +361,22 @@ locs_sav_sf <- st_as_sf(
   crs = 4326
 )
 
+#check with a plot 
+ggplot() +
+  geom_sf(data = HH_plot, fill = "aliceblue", color = "steelblue", linewidth = 0.4) +
+  geom_sf(data = locs_sav_sf,
+          size = 1.8, alpha = 0.7, aes(color=SAV)) +
+   coord_sf(xlim = c(-79.94, -79.85),
+           ylim = c(43.27, 43.30),
+          expand = TRUE) +
+  theme_minimal() +
+  labs(
+    x = "Longitude", y = "Latitude"
+  )
 
 ###add in fetch to the PA dataframe
+fetch2026_raster <- rast("01_data/02_processed_files/raster layers/fetch/fetchnew.tif")
 
-#PA_rand_w_depthSAV<-readRDS("01_data/02_processed_files/PA_rand_w_depthSAV.rds")
-PA_rand_w_depthSAV<-det_randomized
-
-unique_locs <- det_randomized |>
-  distinct(transmitter_id, date, station, year, rand_long, rand_lat)
-
-# ── 3. Convert to sf points — use WGS84 (EPSG:4326) since coords are lat/lon ─
-locs_sf <- st_as_sf(unique_locs,
-                    coords = c("rand_long", "rand_lat"),
-                    crs    = 4326)
-
-# ── 4. Reproject points to match the raster CRS ──────────────────────────────
-# terra and sf need matching CRS for extraction to work correctly
-fetch2026_raster <- rast("01_data/02_processed_files/enviro layers final - to be updated when avaliable/fetchnew.tif")
 plot(fetch2026_raster)
 raster_crs <- crs(fetch2026_raster)
 locs_projected <- st_transform(locs_sf, crs = raster_crs)
@@ -446,7 +411,7 @@ na_sf <- st_as_sf(locs_na,
 # ── For each NA point, find the nearest non-NA point ─────────────────────────
 nearest_idx <- st_nearest_feature(na_sf, complete_sf)
 
-# ── Borrow depth from the nearest complete point ──────────────────────────────
+# ── Borrow fetch from the nearest complete point ──────────────────────────────
 locs_na <- locs_na |>
   mutate(fetch = locs_complete$fetch[nearest_idx])
 
@@ -454,17 +419,28 @@ locs_na <- locs_na |>
 unique_locs_fetch1 <- bind_rows(locs_complete, locs_na)
 
 # ── Join back to pa_data ──────────────────────────────────────────────────────
-det_randomized <- PA_rand_w_depthSAV |>
+pa_data <- pa_data |>
   left_join(unique_locs_fetch1,
             by = c("transmitter_id", "date","year", "station", "rand_lat", "rand_long"))
 
-#save for now can delete later once we add in more variables 
-#saveRDS(det_randomized, "c:/Users/TURNERN/Documents/For Github/RFspatial_rudd/01_data/02_processed_files/PA_rand_w_depthSAVfetch.rds")
 
-head(PA_rand_w_depthSAVfetch)
-##adding in distance to shoreline
-PA_rand_w_depthSAVfetch$rand_lat
-#distance to shoreline code
+locs_fetch_sf <- st_as_sf(
+  unique_locs_fetch1,
+  coords = c("rand_long", "rand_lat"),
+  crs = 4326
+)
+
+ggplot() +
+  geom_sf(data = HH_plot, fill = "aliceblue", color = "steelblue", linewidth = 0.4) +
+  geom_sf(data = locs_fetch_sf,
+          size = 1.8, alpha = 0.7, aes(color=fetch)) +
+   coord_sf(xlim = c(-79.94, -79.85),
+           ylim = c(43.27, 43.30),
+          expand = TRUE) +
+  theme_minimal() +
+  labs(
+    x = "Longitude", y = "Latitude"
+  )
 
 # ===============================
 # 1. Distance to Shoreline
@@ -473,16 +449,9 @@ PA_rand_w_depthSAVfetch$rand_lat
 library(sf)
 library(dplyr)
 
-# Convert your locations to an sf point object
-locations_sf <- st_as_sf(
-  PA_rand_w_depthSAVfetch,
-  coords = c("rand_long", "rand_lat"),
-  crs = 4326,  # WGS 84
-  remove = FALSE
-)
 
 # Transform both datasets to UTM Zone 17N (metres)
-locations_utm <- st_transform(locations_sf, 32617)
+locations_utm <- st_transform(locs_sf, 32617)
 shoreline_utm <- st_transform(shorelinemap, 32617)
 
 # Dissolve polygons to remove boundaries between adjacent polygons
@@ -492,13 +461,13 @@ shoreline_union <- st_union(shoreline_utm)
 shoreline_boundary <- st_boundary(shoreline_union)
 
 # Calculate distance to the nearest polygon boundary
-PA_rand_w_depthSAVfetch$shoreline_distance_m <- as.numeric(
+pa_data$shoreline_distance_m <- as.numeric(
   st_distance(locations_utm, shoreline_boundary)
 )
 
 #check to make sure the distance to shoreline worked
 ggplot() + HH_plot+
-  geom_sf(data = PA_rand_w_depthSAVfetch,
+  geom_sf(data = pa_data,
           size = 1, alpha = 0.7, aes(color=shoreline_distance_m)) +
   theme_minimal() +
   labs(

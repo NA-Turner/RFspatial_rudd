@@ -37,7 +37,7 @@ HH_plot<-ggplot(shorelinemap) +
 #use glatos rpackage to summarize detections by num_fish and num_dets
 
 HH_plot
-
+class(HH_plot)
 ################################
 #load in rasters and P/A data
 #############################
@@ -517,8 +517,7 @@ pdp_list <- purrr::map(purrr::set_names(vars), function(v) {
 y_rng <- range(unlist(map(pdp_list, ~ range(.x$yhat, na.rm = TRUE))))
 y_rng <- c(floor(y_rng[1] * 20) / 20, ceiling(y_rng[2] * 20) / 20)
 
-# ---- 5. Plot function (defined BEFORE it is used) ----
-plot_pdp <- function(df, v, ylim=y_rng) {
+plot_pdp <- function(df, v, ylim = y_rng) {
   df$season <- factor(df$season, levels = season_lv)
 
   base <- theme_bw() +
@@ -529,17 +528,21 @@ plot_pdp <- function(df, v, ylim=y_rng) {
 
   if (is.numeric(df[[v]])) {
     ggplot(df, aes(.data[[v]], yhat, colour = season, group = season)) +
+      geom_line(linewidth = 0.9) +                      # this was missing
       scale_colour_manual(values = season_cols, name = "Season", drop = FALSE) +
-      labs(x = lab(v), y = bquote("Marginal effect" ~ (hat(y)))) +base
+      coord_cartesian(ylim = ylim) +                    # shared y-axis
+      labs(x = lab(v), y = bquote("Marginal effect" ~ (hat(y)))) +
+      base
   } else {
     ggplot(df, aes(.data[[v]], yhat, fill = season)) +
       geom_col(position = position_dodge(width = 0.8), width = 0.75) +
       scale_fill_manual(values = season_cols, name = "Season", drop = FALSE) +
       labs(x = lab(v), y = bquote("Marginal effect" ~ (hat(y)))) +
-       base +
+      base +
       theme(axis.text.x = element_text(angle = 35, hjust = 1))
   }
 }
+
 
 plots <- imap(pdp_list, ~ plot_pdp(.x, .y))
 

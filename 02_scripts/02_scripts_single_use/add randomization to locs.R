@@ -76,15 +76,23 @@ buffers_thermocline <- st_read(
   st_transform(crs = 32617) %>%
   mutate(thermal = "thermocline")
 
-# ── 3. Combine and fix column names ──────────────────────────────────────────
+# ── 3. add year to buffers from receiver look up file (for plotting later on)
 buffers_all <- bind_rows(buffers_isocline, buffers_thermocline) %>%
   rename(
     stationnull = station,
     station     = MERGE_SRC
   )
 
-head(buffers_all)
+buffers_all_year <- buffers_all %>%
+  left_join(
+    receiver_lookup %>% distinct(station, thermal, year),
+    by = c("station", "thermal"),
+    relationship = "many-to-many"
+  )
+
 ##################
+
+head(receiver_lookup)
 
 # ── 4. Build lookup list keyed by station_thermal ─────────────────────────────
 # Uses your edited polygons — irregular/clipped shapes preserved exactly
@@ -116,50 +124,41 @@ missing_keys <- setdiff(
 )
 missing_keys  # should be character(0)
 
-# ── 7. Randomization function ─────────────────────────────────────────────────
-randomize_detection_irregular <- function(recv_x, recv_y, max_radius, 
-                                          station_id, water_buffers, sigma = NULL) {
-  if (is.null(sigma)) sigma <- max_radius / 3
-  max_attempts <- 1000
-  attempt <- 0
-  
-  water_geom <- water_buffers[[station_id]]
-  
-  repeat {
-    attempt <- attempt + 1
-    if (attempt > max_attempts) {
-      warning("Max attempts reached for ", station_id, " — returning receiver location")
-      return(c(recv_x, recv_y))
-    }
-    
-    dx <- rnorm(1, mean = 0, sd = sigma)
-    dy <- rnorm(1, mean = 0, sd = sigma)
-    
-    pt <- st_sfc(st_point(c(recv_x + dx, recv_y + dy)), crs = 32617)
-    if (!st_intersects(pt, water_geom, sparse = FALSE)[1, 1]) next
-    
-    return(c(recv_x + dx, recv_y + dy))
-  }
-}
-
-# ── 8. Run randomization ──────────────────────────────────────────────────────
+##step 7 uniform random sampling within each of the buffers
 set.seed(42)
 
 det_utm_rand <- inputs_all %>%
-  mutate(
-    rand_coords = pmap(
-      list(recv_x_m, recv_y_m, buffer_m, station_thermal),
-      ~randomize_detection_irregular(..1, ..2,
-                                     max_radius    = ..3,
-                                     station_id    = ..4,
-                                     water_buffers = water_buffer_list_edited),
-      .progress = TRUE
-    ),
-    rand_x = map_dbl(rand_coords, 1),
-    rand_y = map_dbl(rand_coords, 2)
-  ) %>%
-  select(-rand_coords)
+  group_by(station_thermal) %>%
+  group_modify(~{
+    key  <- .y$station_thermal
+    geom <- st_sfc(water_buffer_list_edited[[key]], crs = 32617)
 
+    pts    <- st_sample(geom, size = nrow(.x), type = "random", exact = TRUE)
+    coords <- st_coordinates(pts)
+
+    .x %>% mutate(rand_x = coords[, 1], rand_y = coords[, 2])
+  }) %>%
+  ungroup()
+
+# ── 8. Checks ─────────────────────────────────────────────────────────────────
+# Same number of rows, no NAs
+nrow(det_utm_rand) == nrow(inputs_all)
+sum(is.na(det_utm_rand$rand_x))
+
+# Every point sits inside its own buffer (should be TRUE)
+det_check <- det_utm_rand %>%
+  st_as_sf(coords = c("rand_x", "rand_y"), crs = 32617, remove = FALSE)
+
+inside <- map2_lgl(
+  seq_len(nrow(det_check)),
+  det_check$station_thermal,
+  ~ st_within(det_check[.x, ],
+              st_sfc(water_buffer_list_edited[[.y]], crs = 32617),
+              sparse = FALSE)[1, 1]
+)
+
+
+any(duplicated(paste(det_utm_rand$rand_x, det_utm_rand$rand_y)))
 # ── 9. Convert to WGS84 and extract lat/lon ───────────────────────────────────
 det_randomized <- det_utm_rand %>%
   st_as_sf(coords = c("rand_x", "rand_y"), crs = 32617) %>%
@@ -205,29 +204,6 @@ ggplot() +
 #just a plot with iso and thermo and rec locations in the middle with buffer radius to show 
 #coverage in the harbour 
 
-# Build receiver points sf object for plotting
-# How many unique stations in buffers vs recv_plot
-length(unique(buffers_all$station))
-nrow(recv_plot)
-
-# Any NAs in coordinates
-inputs_all %>% 
-  filter(is.na(recv_x_m) | is.na(recv_y_m)) %>% 
-  count(station)
-
-
-# Pull receiver centres from buffer centroids — guarantees one point per buffer
-recv_plot <- buffers_all %>%
-  group_by(station, thermal) %>%
-  slice(1) %>%
-  ungroup() %>%
-  st_centroid() %>%
-  st_transform(crs = 4326)
-
-# Check count matches
-nrow(recv_plot)
-length(unique(buffers_all$station))
-
 ggplot() +
   # Harbour polygon
   geom_sf(data = HH_plot, fill = "aliceblue", color = "steelblue", linewidth = 0.4) +
@@ -249,42 +225,50 @@ ggplot() +
 
 
 #save as an rds file 
-#saveRDS(det_randomized, "c:/Users/TURNERN/Documents/For Github/RFspatial_rudd/01_data/02_processed_files/PAdata_randomized.rds")
+#saveRDS(det_randomized, "01_data/02_processed_files/PAdata_randomized.rds")
+#now go to adding predictors to DF script
 
-pa_data<-readRDS("01_data/02_processed_files/PAdata_randomized.rds")
+#pa_data<-readRDS("01_data/02_processed_files/PAdata_randomized.rds")
 ##################################################
 # fish as an example
-
+unique(pa_data$transmitter_id)
 pa_data$transmitter_id
-rudd512<-filter(pa_data, transmitter_id=="512")
-rudd512 <- st_as_sf(rudd512)
-rudd512$presence<-as.factor(rudd512$presence)
-class(rudd512)
+rudd501<-filter(pa_data, transmitter_id=="501")
+rudd501 <- st_as_sf(rudd501)
+rudd501$presence<-as.factor(rudd501$presence)
+class(rudd501)
 
 #HH_plot
+buffers_all_year_plot <- st_transform(buffers_all_year, 4326) %>%
+  filter(!is.na(year))
+
+years2425<-buffers_all_year_plot %>% filter(year %in% c(2024, 2025))
 
 ggplot() +
   geom_sf(data = HH_plot, fill = "aliceblue", color = "steelblue", linewidth = 0.4) +
-  geom_sf(data = buffers_plot, aes (fill = thermal),alpha = 0.5 
-          , linewidth = 0.3, linetype = "dashed") +
-  geom_sf(data = rudd512,
-          size = 1.8, alpha = 0.7, aes(color=presence)) +
-  scale_color_brewer(palette = "Set4") +
-  facet_wrap(~year) +
-   coord_sf(xlim = c(-79.94, -79.85),
-           ylim = c(43.27, 43.30),
-          expand = TRUE) +
-  theme_minimal() +
-  labs(
-    x = "Longitude", y = "Latitude"
-  )
-
+  geom_sf(data = years2425, aes(fill = thermal), alpha = 0.3,
+          linewidth = 0.3, linetype = "dashed") +
+  geom_sf(data = rudd501, aes(color = presence), size = 1.8, alpha = 0.8) +
+  scale_color_manual(
+    values = c("0" = "red", "1" = "darkgreen"),
+    labels = c("0" = "Absence", "1" = "Presence"),
+    name   = "Detection"
+  ) +
+  scale_fill_manual(
+    values = c("isocline" = "#E69F00", "thermocline" = "#56B4E9"),
+    name   = "Thermal period"
+  ) +
+  facet_wrap(~ year + thermal) +
+  coord_sf(xlim = c(-79.95, -79.75),
+           ylim = c(43.26, 43.35),
+           expand = TRUE) +
+  theme_minimal(base_size=20) +
+  labs(x = "Longitude", y = "Latitude")
 
 unique(det_randomized$station)
 unique(buffers_plot$station)
 
-
-
+  
 #geom_sf change to receiver location 
 #per year 
 #add ham recs rudd
@@ -331,12 +315,6 @@ HH_plot +
   facet_wrap(~year) +
   theme_minimal()
 
-#pretty good just need to clean up
-#one rec is off so need to use the coordinates that were used to make the buffer
-#also one in east end by indian creek that was never there so remove it 
-# maybe best to do facet_wrap year and the 5 maps for thermocline
-#then again but for isocline
-#can maybe do same type of figure where when buffers touch it shows that all as detecteable space
 HH_plot +
   geom_sf(data = buffers_year,
           aes(color = thermal),
