@@ -18,12 +18,6 @@ library(spdep)
 library(gstat)
 library(purrr)
 library(readxl)
-#predictors October 2026
-
-#others to consider
-#photoperiod - vary temporaly 
-
-#stack rasters???
 
 #hamilton harbour polgyon file
 shorelinemap <- read_sf("01_data/04_shapefiles/HH_Poly_Mar2025/HH_WaterLinesToPoly_21Mar2025.shp")
@@ -43,14 +37,14 @@ class(HH_plot)
 #############################
 #raster layers
 #SAV
-SAV2026rbgedits_raster <- rast("01_data/02_processed_files/raster layers/sav_rbgedits1")
-plot(SAV2026rbgedits_raster)
+#SAV2026rbgedits_raster <- rast("01_data/02_processed_files/raster layers/sav_rbgedits1")
+#plot(SAV2026rbgedits_raster)
 #depth 
-depthrast<-rast("01_data/02_processed_files/raster layers/depth/WL.tif")
-plot(depthrast)
+#depthrast<-rast("01_data/02_processed_files/raster layers/depth/WL.tif")
+#plot(depthrast)
 #fetch
-fetch2026_raster <- rast("01_data/02_processed_files/raster layers/fetch/fetchnew.tif")
-plot(fetch2026_raster)
+#fetch2026_raster <- rast("01_data/02_processed_files/raster layers/fetch/fetchnew.tif")
+#plot(fetch2026_raster)
 
 #PA data frame with all variables added  (see adding predictors to DF.R code)
 PA_rand_w_depthSAVfetch<-readRDS("01_data/02_processed_files/PArand_complete_final.rds")
@@ -228,6 +222,37 @@ d <- data.frame(zone = pa_data$zone[as.integer(rownames(pa_data.train))],
                 resid = obs - p_oob)
 aggregate(resid ~ zone, d, function(x) c(mean = mean(x), se = sd(x)/sqrt(length(x))))
 
+
+
+##############################
+## ---- 1. AUC: test set vs spatial CV ----
+auc_test <- mlr::performance(pred_HH, measures = mlr::auc)
+auc_test
+
+tune_HH$y          
+
+# spatial CV AUC for the best hyperparameters (auc.test.mean)
+
+# If the test AUC is clearly higher than the spatial CV AUC, the random
+# test split is probably flattering the model (spatial autocorrelation).
+
+
+## ---- 2. ROC curve (test set) ----
+roc_df <- mlr::generateThreshVsPerfData(
+  pred_HH, measures = list(mlr::fpr, mlr::tpr, mlr::tnr)
+)$data
+
+ggplot(roc_df, aes(x = fpr, y = tpr)) +
+  geom_abline(linetype = "dashed", colour = "grey50") +
+  geom_line(colour = "purple", linewidth = 1.2) +
+  coord_equal() +
+  labs(x = "False positive rate (1 - specificity)",
+       y = "True positive rate (sensitivity)",
+       title = sprintf("Test-set ROC (AUC = %.3f)", auc_test)) +
+  theme_bw() +
+  theme(axis.text  = element_text(size = 14),
+        axis.title = element_text(size = 16))
+
 #####################################################################
 #this code creates a plot of the predictors and summarises on a scale of 1 to 0
 ##different way to plot predictors importance
@@ -267,6 +292,9 @@ aggregate(resid ~ zone, d, function(x) c(mean = mean(x), se = sd(x)/sqrt(length(
 #     axis.title.x = element_text(size = 16),
 #     axis.title.y = element_text(size = 16)
 #   )
+brier_test <- performance(pred_HH, measures = mlr::brier)   # MSE
+rmse_test  <- sqrt(brier_test)                              # RMSE
+c(MSE = unname(brier_test), RMSE = unname(rmse_test))
 
 
 ##############other ways to plot out variable importance
@@ -319,41 +347,6 @@ predrank<-ggplot(imp_mse, aes(mean_inc, reorder(label, mean_inc))) +
 # ggsave("03_outputs/01_figures/pred_rank.png", plot = predrank, width = 11, height = 12, dpi = 300)
 
 predrank
-
-brier_test <- performance(pred_HH, measures = mlr::brier)   # MSE
-rmse_test  <- sqrt(brier_test)                              # RMSE
-c(MSE = unname(brier_test), RMSE = unname(rmse_test))
-
-
-##############################
-## ---- 1. AUC: test set vs spatial CV ----
-auc_test <- mlr::performance(pred_HH, measures = mlr::auc)
-auc_test
-
-tune_HH$y          
-
-# spatial CV AUC for the best hyperparameters (auc.test.mean)
-
-# If the test AUC is clearly higher than the spatial CV AUC, the random
-# test split is probably flattering the model (spatial autocorrelation).
-
-
-## ---- 2. ROC curve (test set) ----
-roc_df <- mlr::generateThreshVsPerfData(
-  pred_HH, measures = list(mlr::fpr, mlr::tpr, mlr::tnr)
-)$data
-
-ggplot(roc_df, aes(x = fpr, y = tpr)) +
-  geom_abline(linetype = "dashed", colour = "grey50") +
-  geom_line(colour = "purple", linewidth = 1.2) +
-  coord_equal() +
-  labs(x = "False positive rate (1 - specificity)",
-       y = "True positive rate (sensitivity)",
-       title = sprintf("Test-set ROC (AUC = %.3f)", auc_test)) +
-  theme_bw() +
-  theme(axis.text  = element_text(size = 14),
-        axis.title = element_text(size = 16))
-
 
 ## ---- 3. Choose a threshold from spatial CV predictions (not the test set) ----
 set.seed(1234)
@@ -517,7 +510,7 @@ pdp_list <- purrr::map(purrr::set_names(vars), function(v) {
 y_rng <- range(unlist(map(pdp_list, ~ range(.x$yhat, na.rm = TRUE))))
 y_rng <- c(floor(y_rng[1] * 20) / 20, ceiling(y_rng[2] * 20) / 20)
 
-plot_pdp <- function(df, v, ylim = y_rng) {
+plot_pdp <- function(df, v) {
   df$season <- factor(df$season, levels = season_lv)
 
   base <- theme_bw() +
@@ -530,7 +523,7 @@ plot_pdp <- function(df, v, ylim = y_rng) {
     ggplot(df, aes(.data[[v]], yhat, colour = season, group = season)) +
       geom_line(linewidth = 0.9) +                      # this was missing
       scale_colour_manual(values = season_cols, name = "Season", drop = FALSE) +
-      coord_cartesian(ylim = ylim) +                    # shared y-axis
+    #  coord_cartesian(ylim = ylim) +                    # shared y-axis
       labs(x = lab(v), y = bquote("Marginal effect" ~ (hat(y)))) +
       base
   } else {
@@ -551,7 +544,7 @@ fig <- wrap_plots(plots, ncol = 2, guides = "collect") &
   theme(legend.position = "bottom")
 fig
 
-ggsave("03_outputs/01_figures/pdp_season_interactions.png", plot = fig, width = 11, height = 12, dpi = 300)
+#ggsave("03_outputs/01_figures/pdp_season_interactions.png", plot = fig, width = 11, height = 12, dpi = 300)
 
 
 
@@ -1112,28 +1105,6 @@ patchwork::wrap_plots(plots, ncol = 2)
 conflicted::conflict_prefer("map", "purrr")
 conflicted::conflict_prefer("imap", "purrr")
 conflicted::conflict_prefer("set_names", "purrr")
-
-
-plot_one <- function(df, v) {
-  base <- theme_bw() + theme(text = element_text(size = 16))
-  ylab <- bquote("Marginal effect" ~ (hat(y)))
-  xl   <- if (v %in% names(labs_map)) labs_map[[v]] else v
-
-  if (is.numeric(df[[v]])) {
-    ggplot(df, aes(.data[[v]], yhat)) +
-      geom_smooth(colour = "purple", linewidth = 1.1) +
-      labs(x = xl, y = ylab) + base
-  } else {
-    ggplot(df, aes(.data[[v]], yhat)) +
-      geom_col(fill = "purple", colour = "purple4") +
-      labs(x = xl, y = ylab) + base +
-      theme(axis.text.x = element_text(angle = 35, hjust = 1))
-  }
-}
-
-plots <- purrr::imap(pdp_list, ~ plot_one(.x, .y))
-patchwork::wrap_plots(plots, ncol = 2)
-
 
 
 ####H statistic interation step 

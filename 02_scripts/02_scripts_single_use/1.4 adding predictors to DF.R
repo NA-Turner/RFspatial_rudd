@@ -2,8 +2,9 @@
 #normally distributed random PAs with unique locations
 #buffer ranges by iso/thermo accounted for
 #5 active tags on the array one any given time
-#dataframe to load in called PA_data_randomized
-#01_data\02_processed_files\PAdata_randomized.rds to start
+
+
+
 
 
 ################
@@ -26,56 +27,6 @@ HH_plot<-ggplot(shorelinemap) +
 #use glatos rpackage to summarize detections by num_fish and num_dets
 
 HH_plot
-
-###########
-#lake ontario water levels for 2024 and 2025 were right in line with the historical average 
-#~75msl for the summer period 
-
-
-#setting the thermocline and isocline buffer radius based on 
-#Wells et al. paper
-
-#########selecting approximate buffer ranges for fall and summer 
-##offshore and nearshore
-#all the west end recs (offshore and nearshore assigned to chain B)
-
-#supp data frome Wells et al - Hamilton Harbour detection range testing
-wellsrecs<-read_excel("01_data/02_processed_files/Wellsetal_suppdata_detectionrange.xlsx")
-
-group_A <- wellsrecs[wellsrecs$Assignment == "A", ]
-group_B <- wellsrecs[wellsrecs$Assignment == "B", ]
-group_C <- wellsrecs[wellsrecs$Assignment == "C", ]
-group_D <- wellsrecs[wellsrecs$Assignment == "D", ]
-group_E <- wellsrecs[wellsrecs$Assignment == "E", ]
-
-#use group A for pelagic offshore + south shore walls
-#use group B for west end and nearshore recs
-
-detectionrange_means<-wellsrecs %>%
-  group_by(Assignment, Season) %>%
-  summarise(
-    group_mean = mean(Mean),
-    group_min = mean(Min),
-    group_max = mean(Max),
-    n_depths = n()
-  )
-
-
-#buffers are as follows, west end and nearshore following group B
-#pulled from supp data
-#fall range = 413
-sum(389+408+366+440+446+395)/6 #407
-#summer range = 300
-#IDs 6,5,13,3, 28, 4)
-sum(309+322+296+276+314+284)/6
-
-#pelagic offshore and southshore 
-#fall range = 429
-sum(435+450+414+414+420)/5
-#426.6
-#summer range = 275
-#recs 21,22, 12, 11, 10
-sum(297+290+266+264+264)/5
 
 
 ########################################
@@ -484,17 +435,7 @@ ggplot() + HH_plot+
 
 #assign each PA randmoized location a unique zone value based on random location 
 
-PA_rand_w_depthSAVfetch<-readRDS("01_data/02_processed_files/PArand_complete.rds")
-
-
-
-
-
-
-
-
-
-
+#PA_rand_w_depthSAVfetch<-readRDS("01_data/02_processed_files/PArand_complete.rds")
 
 #dataframe now has:
 #thermal, year, month, day, season, depth, SAV, fetch, distance to shoreline, zone area
@@ -505,11 +446,11 @@ library(dplyr)
 library(corrplot)
 
 # 1. Select only the numeric explanatory variables (drop the response, IDs, etc.)
-predictors <- PA_rand_w_depthSAVfetch %>%
-  select(where(is.numeric)) %>%
-  select(-c(presence))   # <- replace with your response / non-predictor columns
+predictors <- pa_data %>%
+  dplyr::select(where(is.numeric)) %>%
+  dplyr::select(-c(presence))   # <- replace with your response / non-predictor columns
 
-predictors <- PA_rand_w_depthSAVfetch %>%
+predictors <- pa_data %>%
   st_drop_geometry() %>%
   dplyr::select(depth_m, SAV, fetch, shoreline_distance_m)   # add month_num / day_num if they're candidate predictors
 
@@ -658,20 +599,20 @@ HH_plot+
   labs(x = "Longitude", y = "Latitude")
 
 
-
+#######
 #adding zone in arcgis 
-#write.csv(grid, "01_data/02_processed_files/grid50m_depthsavfetch.csv")
+#####
 library(readxl)
 gridnew<-read_excel("01_data/02_processed_files/grid50m_depthsavfetchzone.xls")
 
 # Grid points with zone (plain data frame -> sf)
 grid_sf <- st_as_sf(gridnew, coords = c("longitude", "latitude"),
                     crs = 4326, remove = FALSE) |>
-  dplyr::filter(!is.na(Zone)) |>               # only grid points that have a zone
+  dplyr::filter(!is.na(zone)) |>               # only grid points that have a zone
   st_transform(32617)
 
 # PA points: use rand_long / rand_lat (the randomized locations)
-pa_sf <- st_as_sf(PA_rand_w_depthSAVfetch |> st_drop_geometry(),
+pa_sf <- st_as_sf(pa_data |> st_drop_geometry(),
                   coords = c("rand_long", "rand_lat"),
                   crs = 4326, remove = FALSE) |>
   st_transform(32617)
@@ -683,11 +624,11 @@ d_m <- as.numeric(st_distance(pa_sf, grid_sf[nn, ], by_element = TRUE))
 summary(d_m)                             # how far each PA point is from its grid point
 
 # Assign zone
-PA_rand_w_depthSAVfetch$zone <- trimws(as.character(grid_sf$Zone[nn]))
+pa_data$zone <- trimws(as.character(grid_sf$zone[nn]))
 
 #plot to ensure zones were assigned correctly 
 HH_plot+
-  geom_point(data = grid_sf, aes(color = Zone, x=longitude, y=latitude), size = 1.8, alpha = 0.7) +
+  geom_point(data = grid_sf, aes(color = zone, x=longitude, y=latitude), size = 1.8, alpha = 0.7) +
   theme_minimal() +
   labs(x = "Longitude", y = "Latitude")
 
@@ -696,7 +637,7 @@ zone_levels <- c("Cootes Paradise", "Bayfront area", "Carrolls Bay",
 
 
 HH_plot+
-  geom_point(data = PA_rand_w_depthSAVfetch, aes(rand_long, rand_lat, colour = zone),
+  geom_point(data = pa_data, aes(rand_long, rand_lat, colour = zone),
              size = 0.6, alpha = 0.8) +
   scale_colour_brewer(palette = "Set1", name = "Zone", drop = FALSE, na.value = "black") +
   guides(colour = guide_legend(override.aes = list(size = 3, alpha = 1))) +
@@ -706,15 +647,11 @@ HH_plot+
 
 #save dataframe
 
-#saveRDS(PA_rand_w_depthSAVfetch, "01_data/02_processed_files/PArand_complete.rds")
-
-PAall<-readRDS(file = "01_data/02_processed_files/PArand_complete.rds")
-
-#clean up any dates where teh active tags fell to  <5
+#clean up any dates where teh active tags dropped to  <5
 min_fish <- 4
 
 # Unique fish detected as present on each date (geometry dropped only for the count)
-fish_per_date <- PAall |>
+fish_per_date <- pa_data |>
   st_drop_geometry() |>
   filter(presence == 1) |>
   group_by(date) |>
@@ -727,17 +664,17 @@ keep_dates <- fish_per_date |>
   pull(date)
 
 # Filter presence AND absence rows by date
-df_filtered <- PAall |>
+df_filtered <- pa_data |>
   filter(date %in% keep_dates)
 
 # ---- Checks ----
 # Rows and dates before/after
 tibble(
   stage      = c("before", "after"),
-  n_rows     = c(nrow(PAall), nrow(df_filtered)),
-  n_dates    = c(n_distinct(PAall$date), n_distinct(df_filtered$date)),
-  n_presence = c(sum(PAall$presence == 1), sum(df_filtered$presence == 1)),
-  n_absence  = c(sum(PAall$presence == 0), sum(df_filtered$presence == 0))
+  n_rows     = c(nrow(pa_data), nrow(df_filtered)),
+  n_dates    = c(n_distinct(pa_data$date), n_distinct(df_filtered$date)),
+  n_presence = c(sum(pa_data$presence == 1), sum(df_filtered$presence == 1)),
+  n_absence  = c(sum(pa_data$presence == 0), sum(df_filtered$presence == 0))
 )
 
 # Confirm every remaining date has >= 4 unique fish present
@@ -746,99 +683,120 @@ df_filtered |>
   filter(presence == 1) |>
   group_by(date) |>
   summarise(n_fish = n_distinct(transmitter_id), .groups = "drop") |>
-  summarise(min_fish_on_any_date = min(n_fish))   # should be >= 5
+  summarise(min_fish_on_any_date = min(n_fish))   # should be >= 4
 
+
+
+##################
+#this is the dataframe to be used in the RF code for analysis
+#saveRDS(pa_filtered, "01_data/02_processed_files/PArand_complete_final.rds")
+#############################
+
+
+
+
+
+
+###########figures/tables
 # Dates removed, including any date that had absences but no presence rows at all
-removed_dates <- setdiff(unique(PAall$date), keep_dates)
+removed_dates <- setdiff(unique(pa_data$date), keep_dates)
 length(removed_dates)
 
-#saveRDS(df_filtered, "01_data/02_processed_files/PArand_complete_final.rds")
+threshold <- 4
 
-#5 or more fish removed 177 dates from the dataframe 
-#4 or more fish removed 54 dates from the dataframe
-#so 123 dates in the dataframe where only 4 fish are active
-
-print(removed_dates)
-
-
-
-
-
-library(tidyverse)
-library(sf)
-
-# Unique fish present per date, from the dataframe BEFORE date filtering
-fish_per_date <- PAall |>
-  st_drop_geometry() |>
-  filter(presence == 1) |>
-  group_by(date) |>
+# 1. Fish detected per day (start from the UNFILTERED data) ----
+daily <- pa_data |>
+  sf::st_drop_geometry() |>
+  # filter(presence == 1) |>   # uncomment/rename if pa_data has absence rows
+  mutate(day = as.Date(date)) |>
+  group_by(day) |>
   summarise(n_fish = n_distinct(transmitter_id), .groups = "drop")
 
-# Fill in every calendar day within each year's range (days with no detections = 0 fish)
-daily <- tibble(date = seq(min(PAall$date), max(PAall$date), by = "day")) |>
-  mutate(year = year(date)) |>
-  group_by(year) |>
-  filter(date >= min(PAall$date[year(PAall$date) == first(year)]),
-         date <= max(PAall$date[year(PAall$date) == first(year)])) |>
-  ungroup() |>
-  left_join(fish_per_date, by = "date") |>
-  mutate(n_fish = replace_na(n_fish, 0),
-         category = case_when(n_fish >= 5 ~ "5+ fish (in both datasets)",
-                              n_fish == 4 ~ "Exactly 4 (4+ dataset only)",
-                              TRUE        ~ "<4 fish (excluded)"),
-         category = factor(category, levels = c("5+ fish (in both datasets)",
-                                                "Exactly 4 (4+ dataset only)",
-                                                "<4 fish (excluded)")))
+# 2. Full calendar, so days with no detections show up too ----
+timeline <- tibble(day = seq(min(daily$day), max(daily$day), by = "day")) |>
+  left_join(daily, by = "day") |>
+  mutate(n_fish = replace_na(n_fish, 0L),
+         status = if_else(n_fish >= threshold, "Included", "Excluded"))
 
-# Continuous periods meeting a threshold
-get_runs <- function(d, thr) {
-  d |>
-    mutate(meets = n_fish >= thr) |>
-    group_by(year) |>
-    mutate(run = consecutive_id(meets)) |>
-    filter(meets) |>
-    group_by(year, run) |>
-    summarise(start = min(date), end = max(date), n_days = n(), .groups = "drop") |>
-    mutate(threshold = paste0(thr, "+ fish"))
-}
+# 3. Filter the data (keeps the sf geometry) ----
+included_days <- timeline$day[timeline$status == "Included"]
 
-runs <- bind_rows(get_runs(daily, 5), get_runs(daily, 4)) |>
-  mutate(y = if_else(threshold == "5+ fish", -0.7, -1.5))
+pa_filtered <- pa_data |>
+  filter(as.Date(date) %in% included_days)   # same presence filter here if needed
 
-# Period summary table
-runs |>
-  select(threshold, year, start, end, n_days) |>
-  arrange(threshold, start)
+# 4. Consecutive included / excluded periods ----
+periods <- timeline |>
+  mutate(grp = consecutive_id(status)) |>
+  group_by(grp, status) |>
+  summarise(start    = min(day),
+            end      = max(day),
+            n_days   = n(),
+            min_fish = min(n_fish),
+            max_fish = max(n_fish),
+            .groups  = "drop") |>
+  dplyr::select(-grp)
 
-runs |>
-  group_by(threshold) |>
-  summarise(n_periods = n(), total_days = sum(n_days), longest_period = max(n_days))
+gaps <- filter(periods, status == "Excluded")
 
-cols <- c("5+ fish (in both datasets)" = "#1f5f8b",
-          "Exactly 4 (4+ dataset only)" = "#e08a1e",
-          "<4 fish (excluded)" = "grey80",
-          "5+ fish" = "#1f5f8b",
-          "4+ fish" = "#e08a1e")
+print(periods, n = Inf)
+print(arrange(gaps, desc(n_days)), n = Inf)   # longest gaps first
 
-p <- ggplot() +
-  geom_line(data = daily, aes(date, n_fish, group = year),
-            colour = "grey50", linewidth = 0.4) +
-  geom_point(data = daily, aes(date, n_fish, colour = category), size = 1.3) +
-  geom_segment(data = runs,
-               aes(x = start - 0.5, xend = end + 0.5, y = y, yend = y, colour = threshold),
-               linewidth = 2.5, lineend = "butt") +
-  geom_hline(yintercept = c(4, 5), linetype = "dashed", colour = "grey40", linewidth = 0.3) +
-  scale_colour_manual(values = cols, name = NULL) +
-  scale_x_date(date_breaks = "1 month", date_labels = "%b %Y") +
-  scale_y_continuous(breaks = function(l) pretty(c(0, l[2])),
-                     expand = expansion(mult = c(0.02, 0.05))) +
-  labs(x = NULL, y = "Number of fish present",
-       title = "Dates retained under 5+ vs 4+ fish thresholds") +
-  theme_bw(base_size = 11) +
+# 5. Overall and monthly summaries ----
+timeline |>
+  count(status) |>
+  mutate(percent = round(100 * n / sum(n), 1))
+
+monthly <- timeline |>
+  group_by(month = lubridate::floor_date(day, "month")) |>
+  summarise(days_total    = n(),
+            days_included = sum(status == "Included"),
+            days_excluded = sum(status == "Excluded"),
+            pct_included  = round(100 * days_included / days_total, 1))
+
+#write.csv(monthly, "03_outputs/02_files/detectionshist_monthly.csv")
+print(monthly, n = Inf)
+months_keep <- c("2023-12", "2024-04")
+
+# Daily fish counts for those two months (includes excluded and zero-detection days)
+daily_sub <- timeline |>
+  filter(format(day, "%Y-%m") %in% months_keep) |>
+  mutate(month = factor(format(day, "%b %Y"), levels = unique(format(day, "%b %Y"))))
+
+print(daily_sub, n = Inf)
+
+# Raw detection rows for those months (unfiltered by threshold)
+pa_sub <- pa_data |>
+  filter(format(as.Date(date), "%Y-%m") %in% months_keep)
+
+# Daily plot
+ggplot(daily_sub, aes(day, n_fish, fill = status)) +
+  geom_col(width = 0.9) +
+  geom_hline(yintercept = threshold - 0.5, linetype = "dashed") +
+  facet_wrap(~ month, scales = "free_x", ncol = 1) +
+  scale_fill_manual(values = c(Included = "#2b6f77", Excluded = "#e08b7d"),
+                    name = NULL) +
+  scale_x_date(date_breaks = "2 days", date_labels = "%d") +
+  labs(x = "Day of month", y = "Fish detected per day") +
+  theme_minimal(base_size = 16) +
   theme(panel.grid.minor = element_blank(),
-        panel.grid.major.y = element_blank(),
-        legend.position = "top",
-        axis.text.x = element_text(angle = 45, hjust = 1))
+        legend.position = "top")
+# 6. Timeline plot ----
+ggplot() +
+  geom_rect(data = gaps,
+            aes(xmin = start - 0.5, xmax = end + 0.5, ymin = -Inf, ymax = Inf,
+                fill = "Excluded"),
+            alpha = 0.25) +
+  geom_col(data = timeline, aes(day, n_fish, fill = status), width = 1) +
+  geom_hline(yintercept = threshold - 0.5, linetype = "dashed") +
+  scale_fill_manual(values = c(Included = "#2b6f77", Excluded = "#e08b7d"),
+                    name = NULL) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b %Y",
+               expand = expansion(mult = 0.01)) +
+  labs(x = "Date", y = "Fish detected per day") +
+  theme_minimal(base_size = 16) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.grid.minor = element_blank(),
+        legend.position = "top")
+###rudd that are included in this analsis. tag details. 
 
-p
-ggsave("rudd_threshold_comparison_line.png", p, width = 11, height = 5, dpi = 300)
+
